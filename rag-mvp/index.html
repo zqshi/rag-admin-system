@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAG MVP - 智能文档问答系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
+    <div class="container mx-auto p-4 max-w-7xl">
+        <!-- Header -->
+        <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h1 class="text-3xl font-bold text-gray-800 mb-2">🚀 RAG MVP 系统</h1>
+                    <p class="text-gray-600">极简但能用的文档智能问答系统</p>
+                </div>
+                <div class="text-right">
+                    <p class="text-sm text-gray-500">系统状态</p>
+                    <p id="systemStatus" class="text-green-600 font-semibold">检查中...</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- 左侧：上传和文档列表 -->
+            <div class="lg:col-span-1 space-y-6">
+                <!-- 上传区域 -->
+                <div class="bg-white rounded-xl shadow-lg p-6">
+                    <h2 class="text-xl font-semibold mb-4 text-gray-800">📄 文档上传</h2>
+                    <div class="border-2 border-dashed border-blue-300 rounded-lg p-6 text-center hover:border-blue-500 transition-colors">
+                        <input type="file" id="fileInput" accept=".pdf,.txt,.md" class="hidden">
+                        <svg class="mx-auto h-12 w-12 text-gray-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                        </svg>
+                        <button onclick="document.getElementById('fileInput').click()" 
+                                class="bg-blue-500 text-white px-6 py-2 rounded-lg hover:bg-blue-600 transition-colors mb-2">
+                            选择文件
+                        </button>
+                        <p class="text-xs text-gray-500">支持 PDF, TXT, Markdown</p>
+                    </div>
+                    <div id="uploadStatus" class="mt-4"></div>
+                </div>
+
+                <!-- 文档列表 -->
+                <div class="bg-white rounded-xl shadow-lg p-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-xl font-semibold text-gray-800">📚 文档库</h2>
+                        <button onclick="loadDocuments()" class="text-blue-500 hover:text-blue-700">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                            </svg>
+                        </button>
+                    </div>
+                    <div id="documentList" class="space-y-2 max-h-96 overflow-y-auto">
+                        <p class="text-gray-500 text-center py-4">加载中...</p>
+                    </div>
+                </div>
+
+                <!-- 统计信息 -->
+                <div class="bg-white rounded-xl shadow-lg p-6">
+                    <h2 class="text-xl font-semibold mb-4 text-gray-800">📊 系统统计</h2>
+                    <div id="statistics" class="space-y-2 text-sm">
+                        <p class="text-gray-500">加载中...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右侧：查询和结果 -->
+            <div class="lg:col-span-2 space-y-6">
+                <!-- 查询区域 -->
+                <div class="bg-white rounded-xl shadow-lg p-6">
+                    <h2 class="text-xl font-semibold mb-4 text-gray-800">💬 智能问答</h2>
+                    <div class="flex gap-2">
+                        <input type="text" 
+                               id="queryInput" 
+                               placeholder="输入你的问题，例如：这个文档讲了什么？" 
+                               class="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200">
+                        <button onclick="submitQuery()" 
+                                id="searchBtn"
+                                class="bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-8 py-3 rounded-lg hover:from-blue-600 hover:to-indigo-700 transition-all font-semibold shadow-md">
+                            搜索
+                        </button>
+                    </div>
+                    <div class="mt-2 flex gap-4 text-sm text-gray-600">
+                        <label class="flex items-center">
+                            <input type="radio" name="topk" value="3" class="mr-1"> Top 3
+                        </label>
+                        <label class="flex items-center">
+                            <input type="radio" name="topk" value="5" checked class="mr-1"> Top 5
+                        </label>
+                        <label class="flex items-center">
+                            <input type="radio" name="topk" value="10" class="mr-1"> Top 10
+                        </label>
+                    </div>
+                </div>
+
+                <!-- 结果显示 -->
+                <div id="results" class="hidden">
+                    <!-- 答案区域 -->
+                    <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                        <h3 class="text-lg font-semibold mb-3 text-gray-800">🎯 智能回答</h3>
+                        <div id="answer" class="prose max-w-none"></div>
+                    </div>
+
+                    <!-- 来源文档 -->
+                    <div class="bg-white rounded-xl shadow-lg p-6">
+                        <h3 class="text-lg font-semibold mb-3 text-gray-800">📎 相关文档片段</h3>
+                        <div id="sources" class="space-y-3"></div>
+                    </div>
+                </div>
+
+                <!-- 空状态 -->
+                <div id="emptyState" class="bg-white rounded-xl shadow-lg p-12 text-center">
+                    <svg class="mx-auto h-24 w-24 text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
+                    </svg>
+                    <p class="text-gray-500 text-lg mb-2">开始探索知识库</p>
+                    <p class="text-gray-400 text-sm">上传文档后，输入问题开始智能问答</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8000';
+        let isSearching = false;
+
+        // 页面加载时初始化
+        window.onload = function() {
+            checkSystemStatus();
+            loadDocuments();
+            loadStatistics();
+            
+            // 定时刷新
+            setInterval(loadStatistics, 30000);
+        };
+
+        // 检查系统状态
+        async function checkSystemStatus() {
+            try {
+                const response = await fetch(`${API_URL}/api/health`);
+                const data = await response.json();
+                
+                const statusEl = document.getElementById('systemStatus');
+                if (data.status === 'healthy') {
+                    statusEl.textContent = `✅ 正常运行 (${data.index_size} 个向量)`;
+                    statusEl.className = 'text-green-600 font-semibold';
+                } else {
+                    statusEl.textContent = '⚠️ 系统异常';
+                    statusEl.className = 'text-yellow-600 font-semibold';
+                }
+            } catch (error) {
+                document.getElementById('systemStatus').textContent = '❌ 连接失败';
+                document.getElementById('systemStatus').className = 'text-red-600 font-semibold';
+            }
+        }
+
+        // 文件上传
+        document.getElementById('fileInput').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const statusDiv = document.getElementById('uploadStatus');
+            statusDiv.innerHTML = `
+                <div class="flex items-center justify-center">
+                    <div class="loader mr-3"></div>
+                    <span class="text-blue-600">正在处理 ${file.name}...</span>
+                </div>
+            `;
+
+            try {
+                const response = await fetch(`${API_URL}/api/upload`, {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                
+                if (response.ok) {
+                    statusDiv.innerHTML = `
+                        <div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded">
+                            <p class="font-semibold">✅ 上传成功！</p>
+                            <p class="text-sm mt-1">文件: ${data.filename}</p>
+                            <p class="text-sm">生成 ${data.chunks_created} 个片段，共 ${data.total_chars} 字符</p>
+                            <p class="text-sm">处理时间: ${data.processing_time}</p>
+                        </div>
+                    `;
+                    
+                    // 刷新列表
+                    loadDocuments();
+                    loadStatistics();
+                    checkSystemStatus();
+                    
+                    // 清空文件选择
+                    e.target.value = '';
+                } else {
+                    throw new Error(data.detail || '上传失败');
+                }
+            } catch (error) {
+                statusDiv.innerHTML = `
+                    <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+                        <p class="font-semibold">❌ 上传失败</p>
+                        <p class="text-sm mt-1">${error.message}</p>
+                    </div>
+                `;
+            }
+        });
+
+        // 提交查询
+        async function submitQuery() {
+            if (isSearching) return;
+            
+            const query = document.getElementById('queryInput').value.trim();
+            if (!query) {
+                alert('请输入查询内容');
+                return;
+            }
+
+            isSearching = true;
+            const searchBtn = document.getElementById('searchBtn');
+            searchBtn.textContent = '搜索中...';
+            searchBtn.disabled = true;
+
+            // 获取选中的top_k值
+            const topK = document.querySelector('input[name="topk"]:checked').value;
+
+            // 显示结果区域，隐藏空状态
+            document.getElementById('results').classList.remove('hidden');
+            document.getElementById('emptyState').classList.add('hidden');
+            
+            // 显示加载状态
+            document.getElementById('answer').innerHTML = '<div class="loader mx-auto"></div>';
+            document.getElementById('sources').innerHTML = '';
+
+            try {
+                const response = await fetch(`${API_URL}/api/query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        query: query, 
+                        top_k: parseInt(topK) 
+                    })
+                });
+                
+                const data = await response.json();
+
+                if (response.ok) {
+                    // 显示答案
+                    document.getElementById('answer').innerHTML = `
+                        <div class="whitespace-pre-wrap text-gray-700">${escapeHtml(data.answer)}</div>
+                        <div class="mt-4 pt-4 border-t border-gray-200">
+                            <span class="text-sm text-gray-500">
+                                找到 ${data.total_results} 个相关片段 | 
+                                处理时间: ${data.processing_time} 秒
+                            </span>
+                        </div>
+                    `;
+
+                    // 显示来源
+                    if (data.sources && data.sources.length > 0) {
+                        document.getElementById('sources').innerHTML = data.sources.map((source, i) => `
+                            <div class="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                                <div class="flex justify-between items-start mb-2">
+                                    <div>
+                                        <span class="inline-block px-2 py-1 text-xs font-semibold text-blue-800 bg-blue-100 rounded">
+                                            ${source.filename}
+                                        </span>
+                                        <span class="text-sm text-gray-500 ml-2">
+                                            片段 #${source.position}
+                                        </span>
+                                    </div>
+                                    <span class="text-sm font-semibold ${source.score > 0.8 ? 'text-green-600' : source.score > 0.6 ? 'text-yellow-600' : 'text-gray-600'}">
+                                        ${(source.score * 100).toFixed(1)}% 相关
+                                    </span>
+                                </div>
+                                <p class="text-sm text-gray-700 leading-relaxed">
+                                    ${escapeHtml(source.content)}
+                                </p>
+                                <p class="text-xs text-gray-400 mt-2">
+                                    ${source.char_count} 字符
+                                </p>
+                            </div>
+                        `).join('');
+                    } else {
+                        document.getElementById('sources').innerHTML = `
+                            <p class="text-gray-500 text-center py-8">
+                                没有找到相关文档片段
+                            </p>
+                        `;
+                    }
+                } else {
+                    throw new Error(data.detail || '查询失败');
+                }
+            } catch (error) {
+                document.getElementById('answer').innerHTML = `
+                    <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+                        <p class="font-semibold">查询失败</p>
+                        <p class="text-sm mt-1">${error.message}</p>
+                    </div>
+                `;
+            } finally {
+                isSearching = false;
+                searchBtn.textContent = '搜索';
+                searchBtn.disabled = false;
+            }
+        }
+
+        // 加载文档列表
+        async function loadDocuments() {
+            try {
+                const response = await fetch(`${API_URL}/api/documents`);
+                const documents = await response.json();
+                
+                const listDiv = document.getElementById('documentList');
+                
+                if (documents.length === 0) {
+                    listDiv.innerHTML = `
+                        <div class="text-center py-8">
+                            <p class="text-gray-500">还没有文档</p>
+                            <p class="text-sm text-gray-400 mt-2">上传第一个文档开始</p>
+                        </div>
+                    `;
+                } else {
+                    listDiv.innerHTML = documents.map(doc => {
+                        const statusColor = doc.status === 'completed' ? 'green' : 
+                                          doc.status === 'processing' ? 'yellow' : 'red';
+                        const statusIcon = doc.status === 'completed' ? '✅' : 
+                                         doc.status === 'processing' ? '⏳' : '❌';
+                        
+                        return `
+                            <div class="bg-gray-50 rounded-lg p-3 hover:bg-gray-100 transition-colors">
+                                <div class="flex justify-between items-start">
+                                    <div class="flex-1 min-w-0">
+                                        <p class="font-medium text-sm text-gray-800 truncate">
+                                            ${statusIcon} ${doc.filename}
+                                        </p>
+                                        <p class="text-xs text-gray-500 mt-1">
+                                            ${doc.chunk_count} 片段 | ${formatBytes(doc.total_chars)}
+                                        </p>
+                                    </div>
+                                    <button onclick="deleteDocument('${doc.id}')" 
+                                            class="ml-2 text-red-500 hover:text-red-700 p-1">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                        </svg>
+                                    </button>
+                                </div>
+                                <p class="text-xs text-gray-400 mt-1">
+                                    ${new Date(doc.upload_time).toLocaleString('zh-CN')}
+                                </p>
+                            </div>
+                        `;
+                    }).join('');
+                }
+            } catch (error) {
+                console.error('加载文档失败:', error);
+                document.getElementById('documentList').innerHTML = `
+                    <p class="text-red-500 text-center">加载失败</p>
+                `;
+            }
+        }
+
+        // 加载统计信息
+        async function loadStatistics() {
+            try {
+                const response = await fetch(`${API_URL}/api/stats`);
+                const stats = await response.json();
+                
+                document.getElementById('statistics').innerHTML = `
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="bg-blue-50 rounded p-2">
+                            <p class="text-xs text-gray-600">文档总数</p>
+                            <p class="text-lg font-semibold text-blue-600">${stats.documents.total}</p>
+                        </div>
+                        <div class="bg-green-50 rounded p-2">
+                            <p class="text-xs text-gray-600">文档片段</p>
+                            <p class="text-lg font-semibold text-green-600">${stats.documents.total_chunks}</p>
+                        </div>
+                        <div class="bg-purple-50 rounded p-2">
+                            <p class="text-xs text-gray-600">搜索次数</p>
+                            <p class="text-lg font-semibold text-purple-600">${stats.searches.total}</p>
+                        </div>
+                        <div class="bg-orange-50 rounded p-2">
+                            <p class="text-xs text-gray-600">平均响应</p>
+                            <p class="text-lg font-semibold text-orange-600">${stats.searches.avg_time}s</p>
+                        </div>
+                    </div>
+                    <div class="mt-3 pt-3 border-t border-gray-200">
+                        <p class="text-xs text-gray-500">
+                            向量维度: ${stats.index.dimension} | 
+                            索引大小: ${stats.index.vectors}
+                        </p>
+                    </div>
+                `;
+            } catch (error) {
+                console.error('加载统计失败:', error);
+            }
+        }
+
+        // 删除文档
+        async function deleteDocument(docId) {
+            if (!confirm('确定要删除这个文档吗？')) return;
+            
+            try {
+                const response = await fetch(`${API_URL}/api/documents/${docId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    loadDocuments();
+                    loadStatistics();
+                    checkSystemStatus();
+                } else {
+                    alert('删除失败');
+                }
+            } catch (error) {
+                alert('删除失败: ' + error.message);
+            }
+        }
+
+        // 辅助函数
+        function escapeHtml(text) {
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return text.replace(/[&<>"']/g, m => map[m]);
+        }
+
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 字符';
+            return bytes.toLocaleString() + ' 字符';
+        }
+
+        // 回车提交
+        document.getElementById('queryInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !isSearching) {
+                submitQuery();
+            }
+        });
+    </script>
+</body>
+</html>
