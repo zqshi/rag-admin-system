@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAG增强版系统 - LangChain + ChromaDB</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .gradient-bg {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .card-shadow {
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div class="min-h-screen">
+        <!-- 头部 -->
+        <header class="gradient-bg text-white py-6 shadow-lg">
+            <div class="container mx-auto px-4">
+                <h1 class="text-3xl font-bold flex items-center">
+                    <span>🚀 RAG增强版系统</span>
+                    <span class="ml-4 text-sm bg-white text-purple-600 px-2 py-1 rounded">v2.0</span>
+                </h1>
+                <p class="mt-2 text-purple-100">基于LangChain智能切片 + ChromaDB向量数据库</p>
+            </div>
+        </header>
+
+        <div class="container mx-auto px-4 py-8">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- 左侧面板 -->
+                <div class="lg:col-span-1 space-y-6">
+                    <!-- 文档上传 -->
+                    <div class="bg-white rounded-lg card-shadow p-6">
+                        <h2 class="text-xl font-semibold mb-4 text-gray-800">📄 文档上传</h2>
+                        
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">
+                                    选择文件
+                                </label>
+                                <input type="file" id="fileInput" accept=".pdf,.txt,.md,.doc,.docx"
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-purple-500">
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">
+                                    切片策略
+                                </label>
+                                <select id="splitterType" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-purple-500">
+                                    <option value="recursive">递归分割（推荐）</option>
+                                    <option value="char">字符分割</option>
+                                    <option value="token">Token分割</option>
+                                </select>
+                            </div>
+                            
+                            <button onclick="uploadDocument()" 
+                                    class="w-full bg-purple-600 text-white py-2 px-4 rounded-lg hover:bg-purple-700 transition">
+                                上传文档
+                            </button>
+                        </div>
+                        
+                        <div id="uploadStatus" class="mt-4 text-sm"></div>
+                    </div>
+
+                    <!-- 系统统计 -->
+                    <div class="bg-white rounded-lg card-shadow p-6">
+                        <h2 class="text-xl font-semibold mb-4 text-gray-800">📊 系统统计</h2>
+                        <div id="statistics" class="space-y-2 text-sm">
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">文档总数:</span>
+                                <span class="font-semibold">-</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">片段总数:</span>
+                                <span class="font-semibold">-</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">搜索次数:</span>
+                                <span class="font-semibold">-</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">向量数据库:</span>
+                                <span class="font-semibold text-green-600">ChromaDB</span>
+                            </div>
+                        </div>
+                        <button onclick="loadStatistics()" 
+                                class="mt-4 w-full bg-gray-600 text-white py-2 px-4 rounded-lg hover:bg-gray-700 transition">
+                            刷新统计
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 中间面板 -->
+                <div class="lg:col-span-2 space-y-6">
+                    <!-- 智能问答 -->
+                    <div class="bg-white rounded-lg card-shadow p-6">
+                        <h2 class="text-xl font-semibold mb-4 text-gray-800">💬 智能问答</h2>
+                        
+                        <div class="space-y-4">
+                            <div>
+                                <textarea id="queryInput" 
+                                          placeholder="输入您的问题..." 
+                                          rows="3"
+                                          class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-purple-500"></textarea>
+                            </div>
+                            
+                            <div class="flex space-x-4">
+                                <div class="flex-1">
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">
+                                        返回结果数
+                                    </label>
+                                    <input type="number" id="topK" value="5" min="1" max="20"
+                                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-purple-500">
+                                </div>
+                                <div class="flex items-end">
+                                    <button onclick="queryDocuments()" 
+                                            class="bg-purple-600 text-white py-2 px-6 rounded-lg hover:bg-purple-700 transition">
+                                        搜索
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 搜索结果 -->
+                        <div id="queryResults" class="mt-6"></div>
+                    </div>
+
+                    <!-- 文档列表 -->
+                    <div class="bg-white rounded-lg card-shadow p-6">
+                        <h2 class="text-xl font-semibold mb-4 text-gray-800">📚 文档库</h2>
+                        <div id="documentList" class="space-y-2">
+                            <p class="text-gray-500">加载中...</p>
+                        </div>
+                    </div>
+
+                    <!-- 搜索历史 -->
+                    <div class="bg-white rounded-lg card-shadow p-6">
+                        <h2 class="text-xl font-semibold mb-4 text-gray-800">🕐 搜索历史</h2>
+                        <div id="searchHistory" class="space-y-2 max-h-64 overflow-y-auto">
+                            <p class="text-gray-500">暂无搜索记录</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8001';
+
+        // 页面加载时初始化
+        window.onload = function() {
+            loadDocuments();
+            loadStatistics();
+            loadSearchHistory();
+        };
+
+        // 上传文档
+        async function uploadDocument() {
+            const fileInput = document.getElementById('fileInput');
+            const splitterType = document.getElementById('splitterType').value;
+            const statusDiv = document.getElementById('uploadStatus');
+            
+            if (!fileInput.files[0]) {
+                statusDiv.innerHTML = '<p class="text-red-500">请选择文件</p>';
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            
+            statusDiv.innerHTML = '<p class="text-blue-500">上传中...</p>';
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/upload?splitter_type=${splitterType}`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    statusDiv.innerHTML = `
+                        <div class="bg-green-100 border border-green-400 text-green-700 px-3 py-2 rounded">
+                            <p class="font-semibold">上传成功！</p>
+                            <p>文档ID: ${data.doc_id}</p>
+                            <p>片段数: ${data.chunks_count}</p>
+                            <p>处理时间: ${data.processing_time.toFixed(2)}秒</p>
+                        </div>
+                    `;
+                    fileInput.value = '';
+                    loadDocuments();
+                    loadStatistics();
+                } else {
+                    statusDiv.innerHTML = `<p class="text-red-500">上传失败: ${data.detail}</p>`;
+                }
+            } catch (error) {
+                statusDiv.innerHTML = `<p class="text-red-500">错误: ${error.message}</p>`;
+            }
+        }
+
+        // 查询文档
+        async function queryDocuments() {
+            const query = document.getElementById('queryInput').value;
+            const topK = document.getElementById('topK').value;
+            const resultsDiv = document.getElementById('queryResults');
+            
+            if (!query) {
+                resultsDiv.innerHTML = '<p class="text-red-500">请输入查询内容</p>';
+                return;
+            }
+            
+            resultsDiv.innerHTML = '<p class="text-blue-500">搜索中...</p>';
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/query`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({query, top_k: parseInt(topK)})
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    let html = `
+                        <div class="border-t pt-4">
+                            <div class="mb-4">
+                                <h3 class="font-semibold text-gray-800 mb-2">AI回答:</h3>
+                                <div class="bg-purple-50 p-4 rounded-lg">
+                                    <p class="text-gray-700 whitespace-pre-wrap">${data.answer}</p>
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <h3 class="font-semibold text-gray-800 mb-2">相关片段 (${data.results.length}):</h3>
+                                <div class="space-y-3">
+                    `;
+                    
+                    data.results.forEach((result, index) => {
+                        const distance = result.distance ? result.distance.toFixed(4) : 'N/A';
+                        const source = result.metadata.source || 'Unknown';
+                        const preview = result.content.substring(0, 200) + '...';
+                        
+                        html += `
+                            <div class="bg-gray-50 p-3 rounded-lg">
+                                <div class="flex justify-between items-start mb-2">
+                                    <span class="text-sm font-medium text-purple-600">#${index + 1}</span>
+                                    <span class="text-xs text-gray-500">相似度: ${distance}</span>
+                                </div>
+                                <p class="text-sm text-gray-700">${preview}</p>
+                                <p class="text-xs text-gray-500 mt-2">来源: ${source.split('/').pop()}</p>
+                            </div>
+                        `;
+                    });
+                    
+                    html += `
+                                </div>
+                            </div>
+                            <div class="mt-4 text-xs text-gray-500">
+                                处理时间: ${data.processing_time.toFixed(3)}秒
+                            </div>
+                        </div>
+                    `;
+                    
+                    resultsDiv.innerHTML = html;
+                    loadSearchHistory();
+                } else {
+                    resultsDiv.innerHTML = `<p class="text-red-500">查询失败: ${data.detail}</p>`;
+                }
+            } catch (error) {
+                resultsDiv.innerHTML = `<p class="text-red-500">错误: ${error.message}</p>`;
+            }
+        }
+
+        // 加载文档列表
+        async function loadDocuments() {
+            try {
+                const response = await fetch(`${API_BASE}/api/documents`);
+                const documents = await response.json();
+                
+                const listDiv = document.getElementById('documentList');
+                
+                if (documents.length === 0) {
+                    listDiv.innerHTML = '<p class="text-gray-500">暂无文档</p>';
+                    return;
+                }
+                
+                let html = '<div class="space-y-3">';
+                documents.forEach(doc => {
+                    html += `
+                        <div class="border rounded-lg p-3 hover:bg-gray-50 transition">
+                            <div class="flex justify-between items-start">
+                                <div class="flex-1">
+                                    <p class="font-semibold text-gray-800">${doc.filename}</p>
+                                    <div class="text-xs text-gray-500 mt-1">
+                                        <span>ID: ${doc.id}</span> | 
+                                        <span>${doc.chunk_count} 片段</span> | 
+                                        <span>${doc.splitter_type}</span> | 
+                                        <span>${new Date(doc.upload_time).toLocaleString()}</span>
+                                    </div>
+                                </div>
+                                <button onclick="deleteDocument('${doc.id}')" 
+                                        class="text-red-500 hover:text-red-700 text-sm">
+                                    删除
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                });
+                html += '</div>';
+                
+                listDiv.innerHTML = html;
+            } catch (error) {
+                console.error('加载文档失败:', error);
+            }
+        }
+
+        // 加载统计信息
+        async function loadStatistics() {
+            try {
+                const response = await fetch(`${API_BASE}/api/statistics`);
+                const stats = await response.json();
+                
+                const statsDiv = document.getElementById('statistics');
+                statsDiv.innerHTML = `
+                    <div class="flex justify-between">
+                        <span class="text-gray-600">文档总数:</span>
+                        <span class="font-semibold">${stats.documents_count}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-600">片段总数:</span>
+                        <span class="font-semibold">${stats.total_chunks}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-600">搜索次数:</span>
+                        <span class="font-semibold">${stats.search_count}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-600">平均处理时间:</span>
+                        <span class="font-semibold">${stats.avg_processing_time.toFixed(2)}秒</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-600">向量数据库:</span>
+                        <span class="font-semibold text-green-600">ChromaDB</span>
+                    </div>
+                `;
+            } catch (error) {
+                console.error('加载统计失败:', error);
+            }
+        }
+
+        // 加载搜索历史
+        async function loadSearchHistory() {
+            try {
+                const response = await fetch(`${API_BASE}/api/search-logs?limit=10`);
+                const logs = await response.json();
+                
+                const historyDiv = document.getElementById('searchHistory');
+                
+                if (logs.length === 0) {
+                    historyDiv.innerHTML = '<p class="text-gray-500">暂无搜索记录</p>';
+                    return;
+                }
+                
+                let html = '<div class="space-y-2">';
+                logs.forEach(log => {
+                    html += `
+                        <div class="border-l-2 border-purple-400 pl-3 py-1">
+                            <p class="text-sm font-medium text-gray-700">${log.query}</p>
+                            <p class="text-xs text-gray-500">
+                                ${log.results_count} 结果 | ${log.processing_time.toFixed(3)}秒 | 
+                                ${new Date(log.timestamp).toLocaleString()}
+                            </p>
+                        </div>
+                    `;
+                });
+                html += '</div>';
+                
+                historyDiv.innerHTML = html;
+            } catch (error) {
+                console.error('加载搜索历史失败:', error);
+            }
+        }
+
+        // 删除文档
+        async function deleteDocument(docId) {
+            if (!confirm('确定要删除这个文档吗？')) return;
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/documents/${docId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    loadDocuments();
+                    loadStatistics();
+                } else {
+                    alert('删除失败');
+                }
+            } catch (error) {
+                console.error('删除文档失败:', error);
+            }
+        }
+    </script>
+</body>
+</html>
