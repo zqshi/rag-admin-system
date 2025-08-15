@@ -250,13 +250,26 @@ class EnhancedDocumentProcessor:
         
         for i, chunk in enumerate(chunks):
             chunk_id = f"{doc_id}_{i}"
+            
+            # 处理元数据，确保所有值都是Chroma支持的类型
+            processed_metadata = {}
+            if metadata:
+                for key, value in metadata.items():
+                    if isinstance(value, (list, dict)):
+                        # 将列表和字典转换为字符串
+                        processed_metadata[key] = str(value)
+                    elif isinstance(value, (str, int, float, bool)):
+                        processed_metadata[key] = value
+                    else:
+                        processed_metadata[key] = str(value)
+            
             chunk_metadata = {
                 "source": file_path,
                 "doc_id": doc_id,
                 "chunk_index": i,
                 "total_chunks": len(chunks),
                 "content_length": len(chunk.page_content),
-                **(metadata or {}),
+                **processed_metadata,
                 **(chunk.metadata or {})
             }
             
