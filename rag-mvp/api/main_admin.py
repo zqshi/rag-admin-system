@@ -15,6 +15,7 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query, Depen
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import logging
 
@@ -145,19 +146,9 @@ async def startup_event():
 
 @app.get("/")
 async def root():
-    """根路径"""
-    return {
-        "system": "Customer Service RAG Admin Dashboard",
-        "version": "1.0.0",
-        "status": "online",
-        "features": [
-            "文档管理",
-            "分片配置",
-            "系统监控",
-            "数据分析",
-            "质量评估"
-        ]
-    }
+    """根路径 - 返回管理后台Web界面"""
+    from fastapi.responses import FileResponse
+    return FileResponse(str(BASE_DIR / "admin_dashboard.html"))
 
 @app.get("/api/admin/health")
 async def admin_health_check(admin_user: str = Depends(get_admin_user)):
@@ -201,12 +192,39 @@ async def admin_health_check(admin_user: str = Depends(get_admin_user)):
 
 # ==================== 文档管理接口 ====================
 
+@app.post("/api/admin/documents/check-duplicate")
+async def check_document_duplicate(
+    file: UploadFile = File(...),
+    admin_user: str = Depends(get_admin_user)
+):
+    """检查文档重复"""
+    try:
+        # 读取文件内容
+        file_content = await file.read()
+        
+        # 验证文件大小（50MB限制）
+        if len(file_content) > 50 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="文件大小超过50MB限制")
+        
+        # 检查重复
+        result = await doc_manager.check_document_duplicates(
+            filename=file.filename,
+            file_content=file_content
+        )
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"检查文档重复失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/admin/documents/upload")
 async def upload_document(
     file: UploadFile = File(...),
     splitter_config: str = Form("default_recursive"),
     tags: str = Form("[]"),  # JSON string
     category: Optional[str] = Form(None),
+    force_replace: bool = Form(False),
     admin_user: str = Depends(get_admin_user)
 ):
     """上传文档"""
@@ -237,7 +255,8 @@ async def upload_document(
             splitter_config_name=splitter_config,
             tags=tags_list,
             category=category,
-            operator=admin_user
+            operator=admin_user,
+            force_replace=force_replace
         )
         
         return result
@@ -314,6 +333,38 @@ async def reprocess_document(
         
     except Exception as e:
         logger.error(f"重新处理文档失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/admin/documents/{doc_id}/details")
+async def get_document_details(
+    doc_id: str,
+    admin_user: str = Depends(get_admin_user)
+):
+    """获取文档详情"""
+    try:
+        result = await doc_manager.get_document_details(doc_id)
+        if not result["success"]:
+            raise HTTPException(status_code=404, detail=result["error"])
+        return result
+        
+    except Exception as e:
+        logger.error(f"获取文档详情失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/admin/documents/{doc_id}/chunks")
+async def get_document_chunks(
+    doc_id: str,
+    admin_user: str = Depends(get_admin_user)
+):
+    """获取文档切片列表"""
+    try:
+        result = await doc_manager.get_document_chunks(doc_id)
+        if not result["success"]:
+            raise HTTPException(status_code=404, detail=result["error"])
+        return result
+        
+    except Exception as e:
+        logger.error(f"获取文档切片失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/admin/documents/statistics")
@@ -569,6 +620,142 @@ async def update_system_config(
     except Exception as e:
         logger.error(f"更新系统配置失败: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# ==================== FAQ管理接口 ====================
+
+@app.post("/api/admin/documents/{doc_id}/extract-faq")
+async def extract_faq_from_document(
+    doc_id: str,
+    max_faqs: int = Query(10, ge=1, le=20),
+    admin_user: str = Depends(get_admin_user)
+):
+    """从文档中抽取FAQ"""
+    try:
+        result = await doc_manager.extract_faqs_from_document(
+            doc_id=doc_id,
+            operator=admin_user,
+            max_faqs=max_faqs
+        )
+        
+        if not result["success"]:
+            raise HTTPException(status_code=400, detail=result["error"])
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"FAQ抽取失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/admin/faqs")
+async def get_faqs_list(
+    doc_id: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    category: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    admin_user: str = Depends(get_admin_user)
+):
+    """获取FAQ列表"""
+    try:
+        offset = (page - 1) * page_size
+        
+        result = await doc_manager.get_faqs_list(
+            doc_id=doc_id,
+            status=status,
+            category=category,
+            limit=page_size,
+            offset=offset
+        )
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"获取FAQ列表失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/admin/faqs/{faq_id}")
+async def update_faq(
+    faq_id: str,
+    updates: dict,
+    admin_user: str = Depends(get_admin_user)
+):
+    """更新FAQ"""
+    try:
+        result = await doc_manager.update_faq(
+            faq_id=faq_id,
+            updates=updates,
+            operator=admin_user
+        )
+        
+        if not result["success"]:
+            raise HTTPException(status_code=400, detail=result["error"])
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"更新FAQ失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/admin/faqs/{faq_id}")
+async def delete_faq(
+    faq_id: str,
+    admin_user: str = Depends(get_admin_user)
+):
+    """删除FAQ"""
+    try:
+        result = await doc_manager.delete_faq(
+            faq_id=faq_id,
+            operator=admin_user
+        )
+        
+        if not result["success"]:
+            raise HTTPException(status_code=400, detail=result["error"])
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"删除FAQ失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/admin/faqs/statistics")
+async def get_faq_statistics(admin_user: str = Depends(get_admin_user)):
+    """获取FAQ统计信息"""
+    try:
+        stats = await doc_manager.get_faq_statistics()
+        return stats
+        
+    except Exception as e:
+        logger.error(f"获取FAQ统计失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/admin/faqs/cleanup-duplicates")
+async def cleanup_duplicate_faqs(admin_user: str = Depends(get_admin_user)):
+    """清理重复的FAQ"""
+    try:
+        result = await doc_manager.cleanup_duplicate_faqs()
+        if not result["success"]:
+            raise HTTPException(status_code=400, detail=result["error"])
+        return result
+        
+    except Exception as e:
+        logger.error(f"清理重复FAQ失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/admin/faqs/extraction-status")
+async def get_faq_extraction_status(admin_user: str = Depends(get_admin_user)):
+    """获取FAQ抽取状态（用于前端置灰功能）"""
+    try:
+        result = await doc_manager.get_faq_extraction_status()
+        if not result["success"]:
+            raise HTTPException(status_code=400, detail=result["error"])
+        return result
+        
+    except Exception as e:
+        logger.error(f"获取FAQ抽取状态失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 挂载静态文件（放在所有API路由之后）
+app.mount("/", StaticFiles(directory=str(BASE_DIR), html=True), name="static")
 
 if __name__ == "__main__":
     import uvicorn

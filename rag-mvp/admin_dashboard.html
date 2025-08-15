@@ -26,6 +26,9 @@
     </style>
 </head>
 <body class="bg-gray-100 font-sans">
+    <!-- Toast 通知组件 -->
+    <div id="toastContainer" class="fixed top-4 right-4 z-50 space-y-2"></div>
+
     <!-- 认证模态框 -->
     <div id="authModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
         <div class="bg-white rounded-lg p-8 w-96">
@@ -78,6 +81,12 @@
                     <span class="flex items-center">
                         <span class="mr-3">📋</span>
                         数据分析
+                    </span>
+                </a>
+                <a href="#" onclick="showPage('faqs')" class="sidebar-link block px-6 py-3 text-gray-700 hover:bg-gray-100" id="nav-faqs">
+                    <span class="flex items-center">
+                        <span class="mr-3">❓</span>
+                        FAQ管理
                     </span>
                 </a>
             </nav>
@@ -339,6 +348,289 @@
                     </div>
                 </div>
             </div>
+
+            <!-- FAQ管理页面 -->
+            <div id="page-faqs" class="page-content p-6 hidden">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-bold text-gray-800">FAQ管理</h2>
+                    <div class="flex space-x-3">
+                        <button onclick="showExtractFaqModal()" class="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600">
+                            🤖 抽取FAQ
+                        </button>
+                        <button onclick="showAddFaqModal()" class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600">
+                            ➕ 手动添加
+                        </button>
+                        <button onclick="cleanupDuplicateFaqs()" class="bg-orange-500 text-white px-4 py-2 rounded-lg hover:bg-orange-600">
+                            🧹 清理重复
+                        </button>
+                    </div>
+                </div>
+
+                <!-- FAQ统计卡片 -->
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+                    <div class="bg-white rounded-lg shadow p-6">
+                        <div class="flex items-center">
+                            <div class="p-3 rounded-full bg-blue-500 text-white">❓</div>
+                            <div class="ml-4">
+                                <p class="text-sm font-medium text-gray-600">总FAQ数</p>
+                                <p class="text-2xl font-bold text-gray-900" id="totalFaqs">-</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-lg shadow p-6">
+                        <div class="flex items-center">
+                            <div class="p-3 rounded-full bg-green-500 text-white">✅</div>
+                            <div class="ml-4">
+                                <p class="text-sm font-medium text-gray-600">活跃FAQ</p>
+                                <p class="text-2xl font-bold text-gray-900" id="activeFaqs">-</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-lg shadow p-6">
+                        <div class="flex items-center">
+                            <div class="p-3 rounded-full bg-yellow-500 text-white">⭐</div>
+                            <div class="ml-4">
+                                <p class="text-sm font-medium text-gray-600">平均质量</p>
+                                <p class="text-2xl font-bold text-gray-900" id="avgFaqQuality">-</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-lg shadow p-6">
+                        <div class="flex items-center">
+                            <div class="p-3 rounded-full bg-purple-500 text-white">🔄</div>
+                            <div class="ml-4">
+                                <p class="text-sm font-medium text-gray-600">最近抽取</p>
+                                <p class="text-sm font-bold text-gray-900" id="lastExtraction">-</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 筛选控件 -->
+                <div class="bg-white rounded-lg shadow p-4 mb-6">
+                    <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
+                        <select id="filterFaqDoc" class="border border-gray-300 rounded px-3 py-2">
+                            <option value="">所有文档</option>
+                        </select>
+                        <select id="filterFaqStatus" class="border border-gray-300 rounded px-3 py-2">
+                            <option value="">所有状态</option>
+                            <option value="active">活跃</option>
+                            <option value="inactive">未激活</option>
+                            <option value="deleted">已删除</option>
+                        </select>
+                        <select id="filterFaqCategory" class="border border-gray-300 rounded px-3 py-2">
+                            <option value="">所有分类</option>
+                            <option value="general">一般问题</option>
+                            <option value="technical">技术问题</option>
+                            <option value="billing">计费问题</option>
+                        </select>
+                        <input type="text" id="filterFaqSearch" placeholder="搜索问题或答案" class="border border-gray-300 rounded px-3 py-2">
+                        <button onclick="loadFaqs()" class="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600">
+                            🔍 筛选
+                        </button>
+                    </div>
+                </div>
+
+                <!-- FAQ列表 -->
+                <div class="bg-white rounded-lg shadow overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">问题</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">答案</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">来源文档</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">状态</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">质量评分</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="faqsTableBody" class="bg-white divide-y divide-gray-200">
+                                <!-- 动态生成内容 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- FAQ分页控件 -->
+                <div class="mt-6 flex justify-between items-center">
+                    <div class="text-sm text-gray-700">
+                        显示 <span id="faqPageInfo">1-20</span> 条，共 <span id="faqTotalCount">0</span> 条
+                    </div>
+                    <div class="flex space-x-2">
+                        <button onclick="previousFaqPage()" class="px-3 py-1 border border-gray-300 rounded text-sm">上一页</button>
+                        <button onclick="nextFaqPage()" class="px-3 py-1 border border-gray-300 rounded text-sm">下一页</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 文档详情页面 -->
+            <div id="page-document-detail" class="page-content p-6 hidden">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-bold text-gray-800">文档详情</h2>
+                    <button onclick="showPage('documents')" class="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600">
+                        ← 返回列表
+                    </button>
+                </div>
+
+                <!-- 文档基本信息 -->
+                <div class="bg-white rounded-lg shadow p-6 mb-6">
+                    <h3 class="text-lg font-semibold mb-4">基本信息</h3>
+                    <div id="documentInfo" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <!-- 动态生成文档信息 -->
+                    </div>
+                </div>
+
+                <!-- 文档预览与切片区域 -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <!-- 左侧：文档预览 -->
+                    <div class="bg-white rounded-lg shadow p-6">
+                        <h3 class="text-lg font-semibold mb-4">文档预览</h3>
+                        <div id="documentPreview" class="border border-gray-200 rounded-lg p-4 h-96 overflow-y-auto">
+                            <!-- 文档预览内容 -->
+                        </div>
+                    </div>
+
+                    <!-- 右侧：切片列表 -->
+                    <div class="bg-white rounded-lg shadow p-6">
+                        <h3 class="text-lg font-semibold mb-4">切片列表 <span id="chunksCount" class="text-sm text-gray-500">(0)</span></h3>
+                        <div id="chunksList" class="space-y-2 h-96 overflow-y-auto">
+                            <!-- 动态生成切片列表 -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 切片统计信息 -->
+                <div class="mt-6 bg-white rounded-lg shadow p-6">
+                    <h3 class="text-lg font-semibold mb-4">切片统计</h3>
+                    <div id="chunksStatistics" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <!-- 动态生成统计信息 -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- FAQ抽取模态框 -->
+    <div id="extractFaqModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg p-8 w-[600px] max-h-[80vh] overflow-y-auto">
+            <h3 class="text-lg font-semibold mb-4">从文档抽取FAQ</h3>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">选择文档</label>
+                    <select id="extractDocSelect" class="w-full border border-gray-300 rounded px-3 py-2">
+                        <option value="">请选择文档...</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">最大FAQ数量</label>
+                    <input type="number" id="extractMaxFaqs" value="10" min="1" max="20" class="w-full border border-gray-300 rounded px-3 py-2">
+                </div>
+                <div class="bg-blue-50 p-4 rounded-lg">
+                    <h4 class="font-medium text-blue-800 mb-2">文档信息</h4>
+                    <div id="extractDocInfo" class="text-sm text-blue-700">
+                        <p>请先选择文档...</p>
+                    </div>
+                </div>
+                <div class="flex space-x-3">
+                    <button onclick="startFaqExtraction()" class="flex-1 bg-green-500 text-white py-2 rounded hover:bg-green-600">
+                        🤖 开始抽取
+                    </button>
+                    <button onclick="hideExtractFaqModal()" class="flex-1 bg-gray-500 text-white py-2 rounded hover:bg-gray-600">
+                        取消
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 手动添加FAQ模态框 -->
+    <div id="addFaqModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg p-8 w-[600px] max-h-[80vh] overflow-y-auto">
+            <h3 class="text-lg font-semibold mb-4">手动添加FAQ</h3>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">问题</label>
+                    <textarea id="addFaqQuestion" rows="3" placeholder="请输入FAQ问题..." class="w-full border border-gray-300 rounded px-3 py-2"></textarea>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">答案</label>
+                    <textarea id="addFaqAnswer" rows="5" placeholder="请输入FAQ答案..." class="w-full border border-gray-300 rounded px-3 py-2"></textarea>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">关联文档</label>
+                    <select id="addFaqDocSelect" class="w-full border border-gray-300 rounded px-3 py-2">
+                        <option value="">选择关联文档...</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">分类</label>
+                    <select id="addFaqCategory" class="w-full border border-gray-300 rounded px-3 py-2">
+                        <option value="general">一般问题</option>
+                        <option value="technical">技术问题</option>
+                        <option value="billing">计费问题</option>
+                        <option value="policy">政策条款</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">标签（逗号分隔）</label>
+                    <input type="text" id="addFaqTags" placeholder="例如: 常见问题,技术支持" class="w-full border border-gray-300 rounded px-3 py-2">
+                </div>
+                <div class="flex space-x-3">
+                    <button onclick="saveManualFaq()" class="flex-1 bg-blue-500 text-white py-2 rounded hover:bg-blue-600">
+                        💾 保存FAQ
+                    </button>
+                    <button onclick="hideAddFaqModal()" class="flex-1 bg-gray-500 text-white py-2 rounded hover:bg-gray-600">
+                        取消
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 编辑FAQ模态框 -->
+    <div id="editFaqModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg p-8 w-[600px] max-h-[80vh] overflow-y-auto">
+            <h3 class="text-lg font-semibold mb-4">编辑FAQ</h3>
+            <div class="space-y-4">
+                <input type="hidden" id="editFaqId">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">问题</label>
+                    <textarea id="editFaqQuestion" rows="3" class="w-full border border-gray-300 rounded px-3 py-2"></textarea>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">答案</label>
+                    <textarea id="editFaqAnswer" rows="5" class="w-full border border-gray-300 rounded px-3 py-2"></textarea>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">状态</label>
+                    <select id="editFaqStatus" class="w-full border border-gray-300 rounded px-3 py-2">
+                        <option value="active">活跃</option>
+                        <option value="inactive">未激活</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">分类</label>
+                    <select id="editFaqCategory" class="w-full border border-gray-300 rounded px-3 py-2">
+                        <option value="general">一般问题</option>
+                        <option value="technical">技术问题</option>
+                        <option value="billing">计费问题</option>
+                        <option value="policy">政策条款</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">质量评分</label>
+                    <input type="number" id="editFaqQualityScore" min="0" max="1" step="0.1" class="w-full border border-gray-300 rounded px-3 py-2">
+                </div>
+                <div class="flex space-x-3">
+                    <button onclick="saveEditedFaq()" class="flex-1 bg-blue-500 text-white py-2 rounded hover:bg-blue-600">
+                        💾 保存修改
+                    </button>
+                    <button onclick="hideEditFaqModal()" class="flex-1 bg-gray-500 text-white py-2 rounded hover:bg-gray-600">
+                        取消
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -374,6 +666,25 @@
                     <label class="block text-sm font-medium text-gray-700 mb-1">标签（逗号分隔）</label>
                     <input type="text" id="uploadTags" placeholder="例如: 技术支持,API文档" class="w-full border border-gray-300 rounded px-3 py-2">
                 </div>
+                <div>
+                    <label class="flex items-center space-x-2">
+                        <input type="checkbox" id="forceReplace" class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
+                        <span class="text-sm text-gray-700">强制替换重复文档</span>
+                    </label>
+                    <p class="text-xs text-gray-500 mt-1">勾选此选项将自动替换系统中的重复文档</p>
+                </div>
+                <div id="duplicateWarning" class="hidden bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                    <h4 class="font-medium text-yellow-800 mb-2">🚧 检测到重复文档</h4>
+                    <div id="duplicateInfo" class="text-sm text-yellow-700 mb-3"></div>
+                    <div class="flex space-x-2">
+                        <button onclick="proceedWithUpload()" class="px-3 py-1 bg-yellow-500 text-white text-sm rounded hover:bg-yellow-600">
+                            强制上传
+                        </button>
+                        <button onclick="cancelUpload()" class="px-3 py-1 bg-gray-500 text-white text-sm rounded hover:bg-gray-600">
+                            取消
+                        </button>
+                    </div>
+                </div>
                 <div class="flex space-x-3">
                     <button onclick="uploadDocument()" class="flex-1 bg-blue-500 text-white py-2 rounded hover:bg-blue-600">
                         上传
@@ -392,11 +703,88 @@
         let currentPage = 1;
         let pageSize = 20;
         let authCredentials = null;
+        
+        // FAQ相关全局变量
+        let currentFaqPage = 1;
+        let faqPageSize = 20;
 
         // 页面初始化
         window.onload = function() {
             showAuthModal();
         };
+
+        // ==================== Toast 通知功能 ====================
+        
+        function showToast(message, type = 'info', duration = 5000) {
+            const container = document.getElementById('toastContainer');
+            const toastId = 'toast_' + Date.now();
+            
+            // 根据类型选择样式
+            let bgColor, textColor, icon;
+            switch(type) {
+                case 'success':
+                    bgColor = 'bg-green-500';
+                    textColor = 'text-white';
+                    icon = '✅';
+                    break;
+                case 'error':
+                    bgColor = 'bg-red-500';
+                    textColor = 'text-white';
+                    icon = '❌';
+                    break;
+                case 'warning':
+                    bgColor = 'bg-yellow-500';
+                    textColor = 'text-white';
+                    icon = '⚠️';
+                    break;
+                case 'info':
+                default:
+                    bgColor = 'bg-blue-500';
+                    textColor = 'text-white';
+                    icon = 'ℹ️';
+                    break;
+            }
+            
+            const toast = document.createElement('div');
+            toast.id = toastId;
+            toast.className = `${bgColor} ${textColor} px-4 py-3 rounded-lg shadow-lg transform transition-all duration-300 ease-in-out opacity-0 translate-x-full max-w-sm`;
+            toast.innerHTML = `
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-2">
+                        <span>${icon}</span>
+                        <span class="text-sm font-medium">${message}</span>
+                    </div>
+                    <button onclick="hideToast('${toastId}')" class="ml-3 text-white hover:text-gray-200">
+                        <span class="text-lg">&times;</span>
+                    </button>
+                </div>
+            `;
+            
+            container.appendChild(toast);
+            
+            // 动画显示
+            setTimeout(() => {
+                toast.classList.remove('opacity-0', 'translate-x-full');
+                toast.classList.add('opacity-100', 'translate-x-0');
+            }, 100);
+            
+            // 自动隐藏
+            if (duration > 0) {
+                setTimeout(() => {
+                    hideToast(toastId);
+                }, duration);
+            }
+        }
+        
+        function hideToast(toastId) {
+            const toast = document.getElementById(toastId);
+            if (toast) {
+                toast.classList.add('opacity-0', 'translate-x-full');
+                setTimeout(() => {
+                    toast.remove();
+                }, 300);
+            }
+        }
 
         // 认证相关
         function showAuthModal() {
@@ -476,6 +864,12 @@
                     break;
                 case 'analytics':
                     loadAnalyticsData();
+                    break;
+                case 'faqs':
+                    loadFaqs();
+                    loadFaqStatistics();
+                    loadDocumentsForFaq();
+                    loadFaqExtractionStatus();
                     break;
             }
         }
@@ -566,6 +960,7 @@
                         ${doc.chunk_count}
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                        <button onclick="viewDocument('${doc.doc_id}')" class="text-green-600 hover:text-green-900 mr-3">查看</button>
                         <button onclick="reprocessDocument('${doc.doc_id}')" class="text-blue-600 hover:text-blue-900 mr-3">重处理</button>
                         <button onclick="deleteDocument('${doc.doc_id}')" class="text-red-600 hover:text-red-900">删除</button>
                     </td>
@@ -583,13 +978,46 @@
             }
         }
 
+        // 文档上传相关全局变量
+        let pendingUploadFile = null;
+        let duplicateCheckResult = null;
+
         // 文档上传
         function showUploadModal() {
             document.getElementById('uploadModal').classList.remove('hidden');
+            // 重置状态
+            document.getElementById('duplicateWarning').classList.add('hidden');
+            document.getElementById('forceReplace').checked = false;
+            pendingUploadFile = null;
+            duplicateCheckResult = null;
         }
 
         function hideUploadModal() {
             document.getElementById('uploadModal').classList.add('hidden');
+        }
+
+        async function checkDocumentDuplicate(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/documents/check-duplicate`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Basic ${authCredentials}`
+                    },
+                    body: formData
+                });
+                
+                if (response.ok) {
+                    return await response.json();
+                } else {
+                    throw new Error('检查重复失败');
+                }
+            } catch (error) {
+                console.error('检查文档重复失败:', error);
+                return { success: false, error: error.message };
+            }
         }
 
         async function uploadDocument() {
@@ -597,14 +1025,70 @@
             const file = fileInput.files[0];
             
             if (!file) {
-                alert('请选择文件');
+                showToast('请选择文件', 'warning');
                 return;
             }
             
+            // 如果没有强制替换选项且没有检查过重复，先检查重复
+            const forceReplace = document.getElementById('forceReplace').checked;
+            
+            if (!forceReplace && !duplicateCheckResult) {
+                showToast('正在检查文档重复...', 'info');
+                
+                const checkResult = await checkDocumentDuplicate(file);
+                if (!checkResult.success) {
+                    showToast('检查重复失败，请重试', 'error');
+                    return;
+                }
+                
+                duplicateCheckResult = checkResult;
+                
+                if (checkResult.is_duplicate) {
+                    // 显示重复警告
+                    showDuplicateWarning(checkResult.duplicates);
+                    pendingUploadFile = file;
+                    return; // 等待用户选择
+                }
+            }
+            
+            // 执行实际上传
+            await performUpload(file, forceReplace);
+        }
+
+        function showDuplicateWarning(duplicates) {
+            const warningDiv = document.getElementById('duplicateWarning');
+            const infoDiv = document.getElementById('duplicateInfo');
+            
+            let duplicateInfo = '<p class="font-medium mb-2">发现以下重复文档：</p><ul class="list-disc list-inside space-y-1">';
+            duplicates.forEach(dup => {
+                duplicateInfo += `<li>文件名: ${dup.filename}, 上传时间: ${new Date(dup.upload_time).toLocaleString()}</li>`;
+            });
+            duplicateInfo += '</ul>';
+            
+            infoDiv.innerHTML = duplicateInfo;
+            warningDiv.classList.remove('hidden');
+            
+            showToast('文档已存在', 'warning', 8000);
+        }
+
+        async function proceedWithUpload() {
+            if (pendingUploadFile) {
+                await performUpload(pendingUploadFile, true);
+            }
+        }
+
+        function cancelUpload() {
+            document.getElementById('duplicateWarning').classList.add('hidden');
+            pendingUploadFile = null;
+            duplicateCheckResult = null;
+        }
+
+        async function performUpload(file, forceReplace = false) {
             const formData = new FormData();
             formData.append('file', file);
             formData.append('splitter_config', document.getElementById('uploadSplitter').value);
             formData.append('category', document.getElementById('uploadCategory').value);
+            formData.append('force_replace', forceReplace);
             
             const tags = document.getElementById('uploadTags').value;
             if (tags) {
@@ -614,6 +1098,8 @@
             }
             
             try {
+                showToast('正在上传文档...', 'info');
+                
                 const response = await fetch(`${API_BASE}/api/admin/documents/upload`, {
                     method: 'POST',
                     headers: {
@@ -622,17 +1108,21 @@
                     body: formData
                 });
                 
-                if (response.ok) {
-                    const result = await response.json();
-                    alert('文档上传成功！');
+                const result = await response.json();
+                
+                if (response.ok && result.success) {
+                    showToast('文档上传成功！', 'success');
                     hideUploadModal();
                     loadDocuments();
+                } else if (result.error === 'duplicate_file') {
+                    showToast(result.message, 'warning');
+                    // 可以在这里处理重复文档的逻辑
                 } else {
-                    const error = await response.json();
-                    alert(`上传失败: ${error.detail}`);
+                    showToast(`上传失败: ${result.message || result.error}`, 'error');
                 }
             } catch (error) {
-                alert('上传失败，请重试');
+                showToast('上传失败，请重试', 'error');
+                console.error('上传失败:', error);
             }
         }
 
@@ -649,14 +1139,303 @@
                 });
                 
                 if (response.ok) {
-                    alert('文档删除成功');
+                    showToast('文档删除成功', 'success');
                     loadDocuments();
                 } else {
-                    alert('删除失败');
+                    showToast('删除失败', 'error');
                 }
             } catch (error) {
-                alert('删除失败，请重试');
+                showToast('删除失败，请重试', 'error');
             }
+        }
+
+        // 查看文档详情
+        async function viewDocument(docId) {
+            try {
+                const docDetails = await loadDocumentDetails(docId);
+                const chunksData = await loadDocumentChunks(docId);
+                
+                // 加载完整文档预览
+                loadFullDocumentPreview(chunksData.chunks);
+                
+                showPage('document-detail');
+            } catch (error) {
+                alert('加载文档详情失败，请重试');
+            }
+        }
+
+        // 加载文档详情
+        async function loadDocumentDetails(docId) {
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/documents/${docId}/details`, {
+                    headers: {
+                        'Authorization': `Basic ${authCredentials}`
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    renderDocumentInfo(data.document);
+                    loadDocumentPreview(data.document, data.file_path);
+                    return data;
+                } else {
+                    throw new Error('获取文档详情失败');
+                }
+            } catch (error) {
+                console.error('加载文档详情失败:', error);
+                throw error;
+            }
+        }
+
+        // 加载文档切片
+        async function loadDocumentChunks(docId) {
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/documents/${docId}/chunks`, {
+                    headers: {
+                        'Authorization': `Basic ${authCredentials}`
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    renderChunksList(data.chunks);
+                    renderChunksStatistics(data.statistics);
+                    return data;
+                } else {
+                    throw new Error('获取文档切片失败');
+                }
+            } catch (error) {
+                console.error('加载文档切片失败:', error);
+                throw error;
+            }
+        }
+
+        // 渲染文档基本信息
+        function renderDocumentInfo(doc) {
+            const container = document.getElementById('documentInfo');
+            container.innerHTML = `
+                <div class="bg-gray-50 p-4 rounded">
+                    <label class="text-sm font-medium text-gray-600">文档名称</label>
+                    <p class="text-gray-900">${doc.filename}</p>
+                </div>
+                <div class="bg-gray-50 p-4 rounded">
+                    <label class="text-sm font-medium text-gray-600">文件大小</label>
+                    <p class="text-gray-900">${(doc.file_size / (1024*1024)).toFixed(2)} MB</p>
+                </div>
+                <div class="bg-gray-50 p-4 rounded">
+                    <label class="text-sm font-medium text-gray-600">上传时间</label>
+                    <p class="text-gray-900">${new Date(doc.upload_time).toLocaleString()}</p>
+                </div>
+                <div class="bg-gray-50 p-4 rounded">
+                    <label class="text-sm font-medium text-gray-600">质量评分</label>
+                    <p class="text-gray-900">${doc.quality_score ? doc.quality_score.toFixed(2) : 'N/A'}</p>
+                </div>
+                <div class="bg-gray-50 p-4 rounded">
+                    <label class="text-sm font-medium text-gray-600">切片数量</label>
+                    <p class="text-gray-900">${doc.chunk_count}</p>
+                </div>
+                <div class="bg-gray-50 p-4 rounded">
+                    <label class="text-sm font-medium text-gray-600">分片策略</label>
+                    <p class="text-gray-900">${doc.splitter_type}</p>
+                </div>
+                <div class="bg-gray-50 p-4 rounded">
+                    <label class="text-sm font-medium text-gray-600">文档分类</label>
+                    <p class="text-gray-900">${doc.category || '未分类'}</p>
+                </div>
+                <div class="bg-gray-50 p-4 rounded">
+                    <label class="text-sm font-medium text-gray-600">状态</label>
+                    <p class="text-gray-900">
+                        <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(doc.status)}">
+                            ${doc.status}
+                        </span>
+                    </p>
+                </div>
+            `;
+        }
+
+        // 加载文档预览
+        function loadDocumentPreview(doc, filePath) {
+            const container = document.getElementById('documentPreview');
+            
+            // 根据文件类型加载不同的预览
+            const fileExt = doc.filename.toLowerCase().split('.').pop();
+            
+            if (fileExt === 'pdf') {
+                container.innerHTML = `
+                    <div class="text-center text-gray-500 py-4">
+                        <p>📄 PDF文档预览</p>
+                        <p class="text-sm mt-2">文件名: ${doc.filename}</p>
+                        <p class="text-sm">大小: ${(doc.file_size / (1024*1024)).toFixed(2)} MB</p>
+                    </div>
+                    <div id="documentContent" class="text-left text-sm leading-relaxed h-80 overflow-y-auto bg-gray-50 p-4 rounded border">
+                        <p class="text-gray-600">正在加载文档内容...</p>
+                    </div>
+                `;
+            } else {
+                container.innerHTML = `
+                    <div class="text-center text-gray-500 py-4">
+                        <p>📄 ${fileExt.toUpperCase()}文档预览</p>
+                        <p class="text-sm mt-2">文件名: ${doc.filename}</p>
+                        <p class="text-sm">大小: ${(doc.file_size / (1024*1024)).toFixed(2)} MB</p>
+                    </div>
+                    <div id="documentContent" class="text-left text-sm leading-relaxed h-80 overflow-y-auto bg-gray-50 p-4 rounded border">
+                        <p class="text-gray-600">正在加载文档内容...</p>
+                    </div>
+                `;
+            }
+        }
+
+        // 加载完整文档预览（从切片重构）
+        function loadFullDocumentPreview(chunks) {
+            const contentContainer = document.getElementById('documentContent');
+            
+            if (!chunks || chunks.length === 0) {
+                contentContainer.innerHTML = '<p class="text-red-500">无法加载文档内容</p>';
+                return;
+            }
+
+            // 按chunk_index排序
+            const sortedChunks = chunks.sort((a, b) => a.chunk_index - b.chunk_index);
+            
+            // 构建完整文档内容
+            let fullContent = '';
+            sortedChunks.forEach((chunk, index) => {
+                fullContent += `<div class="chunk-section" data-chunk-index="${chunk.chunk_index}" id="chunk-${chunk.chunk_index}">`;
+                fullContent += `<div class="chunk-content">${chunk.content.replace(/\n/g, '<br>')}</div>`;
+                if (index < sortedChunks.length - 1) {
+                    fullContent += '<div class="chunk-divider my-2 border-t border-gray-200"></div>';
+                }
+                fullContent += '</div>';
+            });
+
+            contentContainer.innerHTML = `
+                <div class="mb-2 text-xs text-gray-500 sticky top-0 bg-gray-50 py-1">
+                    📖 文档预览 - 共${chunks.length}个切片 (点击右侧切片可快速定位)
+                </div>
+                <div class="document-full-content">
+                    ${fullContent}
+                </div>
+            `;
+
+            // 添加CSS样式
+            if (!document.getElementById('chunk-preview-styles')) {
+                const style = document.createElement('style');
+                style.id = 'chunk-preview-styles';
+                style.textContent = `
+                    .chunk-section {
+                        margin-bottom: 8px;
+                        padding: 4px;
+                        border-radius: 4px;
+                        transition: background-color 0.3s ease;
+                    }
+                    .chunk-section.highlighted {
+                        background-color: #fef3c7;
+                        border-left: 4px solid #f59e0b;
+                        padding-left: 8px;
+                    }
+                    .chunk-content {
+                        line-height: 1.6;
+                        color: #374151;
+                    }
+                    .chunk-divider {
+                        opacity: 0.3;
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+        }
+
+        // 渲染切片列表
+        function renderChunksList(chunks) {
+            const container = document.getElementById('chunksList');
+            const countElement = document.getElementById('chunksCount');
+            
+            countElement.textContent = `(${chunks.length})`;
+            
+            container.innerHTML = '';
+            
+            chunks.forEach((chunk, index) => {
+                const chunkElement = document.createElement('div');
+                chunkElement.className = 'border border-gray-200 rounded-lg p-3 hover:bg-gray-50 cursor-pointer';
+                chunkElement.onclick = () => highlightChunk(chunk.chunk_index, chunk.content);
+                
+                chunkElement.innerHTML = `
+                    <div class="flex justify-between items-start mb-2">
+                        <span class="text-sm font-medium text-gray-700">切片 #${chunk.chunk_index + 1}</span>
+                        <span class="text-xs text-gray-500">${chunk.content_length} 字符</span>
+                    </div>
+                    <p class="text-sm text-gray-600 line-clamp-3">${chunk.content.substring(0, 150)}${chunk.content.length > 150 ? '...' : ''}</p>
+                `;
+                
+                container.appendChild(chunkElement);
+            });
+        }
+
+        // 渲染切片统计
+        function renderChunksStatistics(statistics) {
+            const container = document.getElementById('chunksStatistics');
+            container.innerHTML = `
+                <div class="bg-blue-50 p-4 rounded">
+                    <label class="text-sm font-medium text-blue-600">总切片数</label>
+                    <p class="text-2xl font-bold text-blue-900">${statistics.total_chunks}</p>
+                </div>
+                <div class="bg-green-50 p-4 rounded">
+                    <label class="text-sm font-medium text-green-600">总字符数</label>
+                    <p class="text-2xl font-bold text-green-900">${statistics.total_characters.toLocaleString()}</p>
+                </div>
+                <div class="bg-yellow-50 p-4 rounded">
+                    <label class="text-sm font-medium text-yellow-600">平均长度</label>
+                    <p class="text-2xl font-bold text-yellow-900">${statistics.average_chunk_length}</p>
+                </div>
+                <div class="bg-purple-50 p-4 rounded">
+                    <label class="text-sm font-medium text-purple-600">文档ID</label>
+                    <p class="text-sm font-mono text-purple-900">${statistics.doc_id}</p>
+                </div>
+            `;
+        }
+
+        // 高亮切片（联动功能）
+        function highlightChunk(chunkIndex, chunkContent) {
+            const contentContainer = document.getElementById('documentContent');
+            
+            // 在完整文档预览中定位到对应切片
+            const targetChunk = document.getElementById(`chunk-${chunkIndex}`);
+            
+            if (targetChunk) {
+                // 清除之前的高亮
+                const allChunks = document.querySelectorAll('.chunk-section');
+                allChunks.forEach(chunk => chunk.classList.remove('highlighted'));
+                
+                // 高亮当前切片
+                targetChunk.classList.add('highlighted');
+                
+                // 滚动到目标切片
+                targetChunk.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'center'
+                });
+            } else {
+                // 如果找不到完整预览，显示单个切片内容（兜底方案）
+                contentContainer.innerHTML = `
+                    <div class="bg-yellow-100 border-l-4 border-yellow-400 p-4 mb-4">
+                        <h4 class="font-medium text-yellow-800">切片 #${chunkIndex + 1}</h4>
+                    </div>
+                    <div class="whitespace-pre-wrap text-gray-800">
+                        ${chunkContent}
+                    </div>
+                `;
+                contentContainer.scrollTop = 0;
+            }
+            
+            // 高亮切片列表中的选中项
+            const chunkItems = document.querySelectorAll('#chunksList > div');
+            chunkItems.forEach((item, index) => {
+                if (index === chunkIndex) {
+                    item.classList.add('bg-blue-100', 'border-blue-300');
+                } else {
+                    item.classList.remove('bg-blue-100', 'border-blue-300');
+                }
+            });
         }
 
         // 重处理文档
@@ -900,6 +1679,487 @@
             }, 10000); // 每10秒更新一次
         }
 
+        // ==================== FAQ管理相关函数 ====================
+        
+        // FAQ抽取状态缓存
+        let faqExtractionStatus = {};
+        
+        // 清理重复FAQ
+        async function cleanupDuplicateFaqs() {
+            if (!confirm('确定要清理重复的FAQ吗？此操作将删除重复的FAQ，仅保留最新的版本。')) {
+                return;
+            }
+            
+            try {
+                showToast('正在清理重复FAQ...', 'info');
+                
+                const response = await fetch(`${API_BASE}/api/admin/faqs/cleanup-duplicates`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Basic ${authCredentials}`
+                    }
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    if (result.success) {
+                        showToast(result.message, 'success');
+                        loadFaqs(); // 刷新FAQ列表
+                        loadFaqStatistics(); // 刷新统计信息
+                    } else {
+                        showToast(`清理失败: ${result.error}`, 'error');
+                    }
+                } else {
+                    showToast('清理操作失败，请重试', 'error');
+                }
+            } catch (error) {
+                showToast('清理操作失败，请重试', 'error');
+                console.error('清理重复FAQ失败:', error);
+            }
+        }
+        
+        // 加载FAQ抽取状态
+        async function loadFaqExtractionStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/faqs/extraction-status`, {
+                    headers: {
+                        'Authorization': `Basic ${authCredentials}`
+                    }
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    if (result.success) {
+                        faqExtractionStatus = result.extraction_status;
+                        updateDocumentSelectStatus(); // 更新文档选择器的状态
+                    }
+                }
+            } catch (error) {
+                console.error('获取FAQ抽取状态失败:', error);
+            }
+        }
+        
+        // 更新文档选择器状态（置灰已完成抽取的文档）
+        function updateDocumentSelectStatus() {
+            const extractDocSelect = document.getElementById('extractDocSelect');
+            if (extractDocSelect && faqExtractionStatus) {
+                Array.from(extractDocSelect.options).forEach(option => {
+                    if (option.value && faqExtractionStatus[option.value]) {
+                        const status = faqExtractionStatus[option.value];
+                        if (status.status === 'completed') {
+                            // 置灰已完成的文档
+                            option.disabled = true;
+                            option.style.color = '#9CA3AF';
+                            option.textContent = option.textContent.replace(' (已完成抽取)', '') + ' (已完成抽取)';
+                        } else if (status.current_status === 'processing') {
+                            // 标记正在处理的文档
+                            option.disabled = true;
+                            option.style.color = '#F59E0B';
+                            option.textContent = option.textContent.replace(' (正在抽取)', '') + ' (正在抽取)';
+                        }
+                    }
+                });
+            }
+        }
+        
+        // 加载FAQ统计信息
+        async function loadFaqStatistics() {
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/faqs/statistics`, {
+                    headers: {
+                        'Authorization': `Basic ${authCredentials}`
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('totalFaqs').textContent = data.total_faqs || 0;
+                    document.getElementById('activeFaqs').textContent = data.total_faqs || 0;
+                    document.getElementById('avgFaqQuality').textContent = data.average_quality_score || '0.00';
+                    document.getElementById('lastExtraction').textContent = data.last_updated ? new Date(data.last_updated).toLocaleDateString() : 'N/A';
+                }
+            } catch (error) {
+                console.error('加载FAQ统计失败:', error);
+            }
+        }
+        
+        // 加载FAQ列表
+        async function loadFaqs() {
+            try {
+                const docId = document.getElementById('filterFaqDoc')?.value || '';
+                const status = document.getElementById('filterFaqStatus')?.value || '';
+                const category = document.getElementById('filterFaqCategory')?.value || '';
+                
+                const params = new URLSearchParams({
+                    page: currentFaqPage,
+                    page_size: faqPageSize
+                });
+                
+                if (docId) params.append('doc_id', docId);
+                if (status) params.append('status', status);
+                if (category) params.append('category', category);
+                
+                const response = await fetch(`${API_BASE}/api/admin/faqs?${params}`, {
+                    headers: {
+                        'Authorization': `Basic ${authCredentials}`
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    renderFaqsTable(data.faqs);
+                    updateFaqPagination(data);
+                }
+            } catch (error) {
+                console.error('加载FAQ列表失败:', error);
+            }
+        }
+        
+        // 渲染FAQ列表
+        function renderFaqsTable(faqs) {
+            const tbody = document.getElementById('faqsTableBody');
+            tbody.innerHTML = '';
+            
+            faqs.forEach(faq => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="px-6 py-4">
+                        <div class="text-sm font-medium text-gray-900 max-w-xs truncate" title="${faq.question}">
+                            ${faq.question}
+                        </div>
+                    </td>
+                    <td class="px-6 py-4">
+                        <div class="text-sm text-gray-600 max-w-sm truncate" title="${faq.answer}">
+                            ${faq.answer}
+                        </div>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <div class="text-sm text-gray-900">${faq.doc_filename || faq.doc_id.substring(0, 8) + '...'}</div>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getFaqStatusColor(faq.status)}">
+                            ${faq.status}
+                        </span>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        ${faq.quality_score ? faq.quality_score.toFixed(2) : 'N/A'}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                        <button onclick="viewFaqDetail('${faq.faq_id}')" class="text-green-600 hover:text-green-900 mr-3">查看</button>
+                        <button onclick="editFaq('${faq.faq_id}')" class="text-blue-600 hover:text-blue-900 mr-3">编辑</button>
+                        <button onclick="deleteFaq('${faq.faq_id}')" class="text-red-600 hover:text-red-900">删除</button>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+        
+        function getFaqStatusColor(status) {
+            switch(status) {
+                case 'active': return 'bg-green-100 text-green-800';
+                case 'inactive': return 'bg-yellow-100 text-yellow-800';
+                case 'deleted': return 'bg-red-100 text-red-800';
+                default: return 'bg-gray-100 text-gray-800';
+            }
+        }
+        
+        // 加载文档列表用于FAQ功能
+        async function loadDocumentsForFaq() {
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/documents?page_size=100`, {
+                    headers: {
+                        'Authorization': `Basic ${authCredentials}`
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    populateDocumentSelects(data.documents);
+                }
+            } catch (error) {
+                console.error('加载文档列表失败:', error);
+            }
+        }
+        
+        function populateDocumentSelects(documents) {
+            const selects = [
+                document.getElementById('extractDocSelect'),
+                document.getElementById('addFaqDocSelect'),
+                document.getElementById('filterFaqDoc')
+            ];
+            
+            selects.forEach(select => {
+                if (select) {
+                    // 保留第一个选项
+                    const firstOption = select.children[0];
+                    select.innerHTML = '';
+                    select.appendChild(firstOption);
+                    
+                    documents.forEach(doc => {
+                        if (doc.status === 'completed') {
+                            const option = document.createElement('option');
+                            option.value = doc.doc_id;
+                            option.textContent = `${doc.filename} (${doc.chunk_count}切片)`;
+                            select.appendChild(option);
+                        }
+                    });
+                }
+            });
+            
+            // 更新文档状态（置灰已完成抽取的文档）
+            updateDocumentSelectStatus();
+        }
+        
+        // FAQ抽取模态框
+        function showExtractFaqModal() {
+            document.getElementById('extractFaqModal').classList.remove('hidden');
+        }
+        
+        function hideExtractFaqModal() {
+            document.getElementById('extractFaqModal').classList.add('hidden');
+        }
+        
+        // 手动添加FAQ模态框
+        function showAddFaqModal() {
+            document.getElementById('addFaqModal').classList.remove('hidden');
+        }
+        
+        function hideAddFaqModal() {
+            document.getElementById('addFaqModal').classList.add('hidden');
+        }
+        
+        // 编辑FAQ模态框
+        function showEditFaqModal() {
+            document.getElementById('editFaqModal').classList.remove('hidden');
+        }
+        
+        function hideEditFaqModal() {
+            document.getElementById('editFaqModal').classList.add('hidden');
+        }
+        
+        // 文档选择变化时更新信息
+        function updateExtractDocInfo() {
+            const select = document.getElementById('extractDocSelect');
+            const infoDiv = document.getElementById('extractDocInfo');
+            
+            if (select.value) {
+                const selectedOption = select.options[select.selectedIndex];
+                const filename = selectedOption.textContent;
+                infoDiv.innerHTML = `
+                    <p><strong>文档名称:</strong> ${filename}</p>
+                    <p><strong>文档ID:</strong> ${select.value}</p>
+                    <p class="text-sm mt-2">将从此文档的所有切片中抽取FAQ</p>
+                `;
+            } else {
+                infoDiv.innerHTML = '<p>请先选择文档...</p>';
+            }
+        }
+        
+        // 开始FAQ抽取
+        async function startFaqExtraction() {
+            const docId = document.getElementById('extractDocSelect').value;
+            const maxFaqs = document.getElementById('extractMaxFaqs').value;
+            
+            if (!docId) {
+                alert('请选择文档');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/documents/${docId}/extract-faq?max_faqs=${maxFaqs}`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Basic ${authCredentials}`
+                    }
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    alert(`FAQ抽取成功！抽取了${result.extracted_count}个FAQ`);
+                    hideExtractFaqModal();
+                    loadFaqs();
+                    loadFaqStatistics();
+                } else {
+                    const error = await response.json();
+                    alert(`抽取失败: ${error.detail}`);
+                }
+            } catch (error) {
+                alert('抽取失败，请重试');
+                console.error('FAQ抽取失败:', error);
+            }
+        }
+        
+        // 保存手动添加的FAQ
+        async function saveManualFaq() {
+            const question = document.getElementById('addFaqQuestion').value.trim();
+            const answer = document.getElementById('addFaqAnswer').value.trim();
+            const docId = document.getElementById('addFaqDocSelect').value;
+            const category = document.getElementById('addFaqCategory').value;
+            const tags = document.getElementById('addFaqTags').value;
+            
+            if (!question || !answer) {
+                alert('请填写问题和答案');
+                return;
+            }
+            
+            if (!docId) {
+                alert('请选择关联文档');
+                return;
+            }
+            
+            const faqData = {
+                question: question,
+                answer: answer,
+                doc_id: docId,
+                category: category,
+                tags: tags ? tags.split(',').map(t => t.trim()) : [],
+                extracted_by: 'manual',
+                status: 'active'
+            };
+            
+            try {
+                // 这里需要一个创建FAQ的API，暂时使用模拟
+                alert('手动添加FAQ功能开发中...');
+                // hideAddFaqModal();
+                // loadFaqs();
+                // loadFaqStatistics();
+            } catch (error) {
+                alert('保存失败，请重试');
+                console.error('保存FAQ失败:', error);
+            }
+        }
+        
+        // 编辑FAQ
+        async function editFaq(faqId) {
+            try {
+                // 首先获取FAQ详情
+                const response = await fetch(`${API_BASE}/api/admin/faqs`, {
+                    headers: {
+                        'Authorization': `Basic ${authCredentials}`
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    const faq = data.faqs.find(f => f.faq_id === faqId);
+                    
+                    if (faq) {
+                        // 填充编辑表单
+                        document.getElementById('editFaqId').value = faq.faq_id;
+                        document.getElementById('editFaqQuestion').value = faq.question;
+                        document.getElementById('editFaqAnswer').value = faq.answer;
+                        document.getElementById('editFaqStatus').value = faq.status;
+                        document.getElementById('editFaqCategory').value = faq.category || 'general';
+                        document.getElementById('editFaqQualityScore').value = faq.quality_score || 0;
+                        
+                        showEditFaqModal();
+                    }
+                }
+            } catch (error) {
+                alert('获取FAQ信息失败');
+                console.error('获取FAQ失败:', error);
+            }
+        }
+        
+        // 保存编辑的FAQ
+        async function saveEditedFaq() {
+            const faqId = document.getElementById('editFaqId').value;
+            const question = document.getElementById('editFaqQuestion').value.trim();
+            const answer = document.getElementById('editFaqAnswer').value.trim();
+            const status = document.getElementById('editFaqStatus').value;
+            const category = document.getElementById('editFaqCategory').value;
+            const qualityScore = parseFloat(document.getElementById('editFaqQualityScore').value);
+            
+            if (!question || !answer) {
+                alert('请填写问题和答案');
+                return;
+            }
+            
+            const updates = {
+                question: question,
+                answer: answer,
+                status: status,
+                category: category,
+                quality_score: qualityScore
+            };
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/faqs/${faqId}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Authorization': `Basic ${authCredentials}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(updates)
+                });
+                
+                if (response.ok) {
+                    alert('FAQ更新成功');
+                    hideEditFaqModal();
+                    loadFaqs();
+                    loadFaqStatistics();
+                } else {
+                    const error = await response.json();
+                    alert(`更新失败: ${error.detail}`);
+                }
+            } catch (error) {
+                alert('更新失败，请重试');
+                console.error('更新FAQ失败:', error);
+            }
+        }
+        
+        // 删除FAQ
+        async function deleteFaq(faqId) {
+            if (!confirm('确定要删除这个FAQ吗？')) return;
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/faqs/${faqId}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': `Basic ${authCredentials}`
+                    }
+                });
+                
+                if (response.ok) {
+                    alert('FAQ删除成功');
+                    loadFaqs();
+                    loadFaqStatistics();
+                } else {
+                    alert('删除失败');
+                }
+            } catch (error) {
+                alert('删除失败，请重试');
+                console.error('删除FAQ失败:', error);
+            }
+        }
+        
+        // 查看FAQ详情
+        function viewFaqDetail(faqId) {
+            // 可以在这里实现FAQ详情查看功能
+            alert(`查看FAQ详情: ${faqId}`);
+        }
+        
+        // FAQ分页控制
+        function previousFaqPage() {
+            if (currentFaqPage > 1) {
+                currentFaqPage--;
+                loadFaqs();
+            }
+        }
+        
+        function nextFaqPage() {
+            currentFaqPage++;
+            loadFaqs();
+        }
+        
+        function updateFaqPagination(data) {
+            const start = (currentFaqPage - 1) * faqPageSize + 1;
+            const end = Math.min(currentFaqPage * faqPageSize, data.total_count);
+            
+            document.getElementById('faqPageInfo').textContent = `${start}-${end}`;
+            document.getElementById('faqTotalCount').textContent = data.total_count;
+        }
+        
         // 配置滑块更新
         document.addEventListener('DOMContentLoaded', function() {
             const intentSlider = document.getElementById('intentThreshold');
@@ -915,6 +2175,12 @@
                 escalationSlider.addEventListener('input', function() {
                     document.getElementById('escalationThresholdValue').textContent = this.value;
                 });
+            }
+            
+            // 文档选择变化监听
+            const extractDocSelect = document.getElementById('extractDocSelect');
+            if (extractDocSelect) {
+                extractDocSelect.addEventListener('change', updateExtractDocInfo);
             }
         });
     </script>
