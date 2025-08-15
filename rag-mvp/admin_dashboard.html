@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>客服RAG管理后台 - Admin Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .sidebar-active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .card-hover {
+            transition: all 0.3s ease;
+        }
+        .card-hover:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+        .gradient-text {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans">
+    <!-- 认证模态框 -->
+    <div id="authModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-8 w-96">
+            <h2 class="text-2xl font-bold mb-6 text-center gradient-text">管理员登录</h2>
+            <div class="space-y-4">
+                <input type="text" id="username" placeholder="用户名" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500">
+                <input type="password" id="password" placeholder="密码" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500">
+                <button onclick="login()" class="w-full bg-gradient-to-r from-blue-500 to-purple-600 text-white py-2 rounded-lg hover:opacity-90">
+                    登录
+                </button>
+                <p class="text-xs text-gray-500 text-center">默认用户名: admin, 密码: admin123</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="flex h-screen">
+        <!-- 侧边栏 -->
+        <div class="w-64 bg-white shadow-lg">
+            <div class="p-6">
+                <h1 class="text-xl font-bold gradient-text">RAG管理后台</h1>
+                <p class="text-sm text-gray-500 mt-1">Customer Service Admin</p>
+            </div>
+            
+            <nav class="mt-6">
+                <a href="#" onclick="showPage('dashboard')" class="sidebar-link block px-6 py-3 text-gray-700 hover:bg-gray-100" id="nav-dashboard">
+                    <span class="flex items-center">
+                        <span class="mr-3">📊</span>
+                        仪表板
+                    </span>
+                </a>
+                <a href="#" onclick="showPage('documents')" class="sidebar-link block px-6 py-3 text-gray-700 hover:bg-gray-100" id="nav-documents">
+                    <span class="flex items-center">
+                        <span class="mr-3">📚</span>
+                        文档管理
+                    </span>
+                </a>
+                <a href="#" onclick="showPage('config')" class="sidebar-link block px-6 py-3 text-gray-700 hover:bg-gray-100" id="nav-config">
+                    <span class="flex items-center">
+                        <span class="mr-3">⚙️</span>
+                        系统配置
+                    </span>
+                </a>
+                <a href="#" onclick="showPage('monitoring')" class="sidebar-link block px-6 py-3 text-gray-700 hover:bg-gray-100" id="nav-monitoring">
+                    <span class="flex items-center">
+                        <span class="mr-3">📈</span>
+                        实时监控
+                    </span>
+                </a>
+                <a href="#" onclick="showPage('analytics')" class="sidebar-link block px-6 py-3 text-gray-700 hover:bg-gray-100" id="nav-analytics">
+                    <span class="flex items-center">
+                        <span class="mr-3">📋</span>
+                        数据分析
+                    </span>
+                </a>
+            </nav>
+            
+            <div class="absolute bottom-0 w-64 p-6">
+                <div class="text-xs text-gray-500">
+                    <div>版本: v1.0.0</div>
+                    <div>状态: <span id="systemStatus" class="text-green-500">在线</span></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 主内容区域 -->
+        <div class="flex-1 overflow-auto">
+            <!-- 仪表板页面 -->
+            <div id="page-dashboard" class="page-content p-6">
+                <h2 class="text-2xl font-bold text-gray-800 mb-6">系统概览</h2>
+                
+                <!-- 关键指标卡片 -->
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                    <div class="bg-white rounded-lg shadow p-6 card-hover">
+                        <div class="flex items-center">
+                            <div class="p-3 rounded-full bg-blue-500 text-white">📚</div>
+                            <div class="ml-4">
+                                <p class="text-sm font-medium text-gray-600">总文档数</p>
+                                <p class="text-2xl font-bold text-gray-900" id="totalDocs">-</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-white rounded-lg shadow p-6 card-hover">
+                        <div class="flex items-center">
+                            <div class="p-3 rounded-full bg-green-500 text-white">🔥</div>
+                            <div class="ml-4">
+                                <p class="text-sm font-medium text-gray-600">活跃对话</p>
+                                <p class="text-2xl font-bold text-gray-900" id="activeChats">-</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-white rounded-lg shadow p-6 card-hover">
+                        <div class="flex items-center">
+                            <div class="p-3 rounded-full bg-yellow-500 text-white">⭐</div>
+                            <div class="ml-4">
+                                <p class="text-sm font-medium text-gray-600">平均质量</p>
+                                <p class="text-2xl font-bold text-gray-900" id="avgQuality">-</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-white rounded-lg shadow p-6 card-hover">
+                        <div class="flex items-center">
+                            <div class="p-3 rounded-full bg-red-500 text-white">🚀</div>
+                            <div class="ml-4">
+                                <p class="text-sm font-medium text-gray-600">响应时间</p>
+                                <p class="text-2xl font-bold text-gray-900" id="avgResponse">-</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 图表区域 -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="bg-white rounded-lg shadow p-6">
+                        <h3 class="text-lg font-semibold mb-4">系统资源使用</h3>
+                        <canvas id="resourceChart" width="400" height="200"></canvas>
+                    </div>
+                    
+                    <div class="bg-white rounded-lg shadow p-6">
+                        <h3 class="text-lg font-semibold mb-4">文档分类分布</h3>
+                        <canvas id="categoryChart" width="400" height="200"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 文档管理页面 -->
+            <div id="page-documents" class="page-content p-6 hidden">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-bold text-gray-800">文档管理</h2>
+                    <button onclick="showUploadModal()" class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600">
+                        📤 上传文档
+                    </button>
+                </div>
+
+                <!-- 筛选控件 -->
+                <div class="bg-white rounded-lg shadow p-4 mb-6">
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <select id="filterCategory" class="border border-gray-300 rounded px-3 py-2">
+                            <option value="">所有分类</option>
+                            <option value="technical">技术文档</option>
+                            <option value="faq">常见问题</option>
+                            <option value="policy">政策条款</option>
+                        </select>
+                        <select id="filterStatus" class="border border-gray-300 rounded px-3 py-2">
+                            <option value="">所有状态</option>
+                            <option value="completed">已完成</option>
+                            <option value="processing">处理中</option>
+                            <option value="failed">失败</option>
+                        </select>
+                        <input type="text" id="filterTags" placeholder="标签筛选" class="border border-gray-300 rounded px-3 py-2">
+                        <button onclick="loadDocuments()" class="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600">
+                            🔍 筛选
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 文档列表 -->
+                <div class="bg-white rounded-lg shadow overflow-hidden">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">文档信息</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">状态</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">质量评分</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">分片数</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="documentsTableBody" class="bg-white divide-y divide-gray-200">
+                            <!-- 动态生成内容 -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- 分页控件 -->
+                <div class="mt-6 flex justify-between items-center">
+                    <div class="text-sm text-gray-700">
+                        显示 <span id="pageInfo">1-20</span> 条，共 <span id="totalCount">0</span> 条
+                    </div>
+                    <div class="flex space-x-2">
+                        <button onclick="previousPage()" class="px-3 py-1 border border-gray-300 rounded text-sm">上一页</button>
+                        <button onclick="nextPage()" class="px-3 py-1 border border-gray-300 rounded text-sm">下一页</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 系统配置页面 -->
+            <div id="page-config" class="page-content p-6 hidden">
+                <h2 class="text-2xl font-bold text-gray-800 mb-6">系统配置</h2>
+                
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <!-- 分片策略配置 -->
+                    <div class="bg-white rounded-lg shadow p-6">
+                        <h3 class="text-lg font-semibold mb-4">分片策略配置</h3>
+                        <div id="splitterConfigs" class="space-y-4">
+                            <!-- 动态生成配置列表 -->
+                        </div>
+                        <button onclick="showAddConfigModal()" class="mt-4 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">
+                            ➕ 添加配置
+                        </button>
+                    </div>
+
+                    <!-- 系统参数配置 -->
+                    <div class="bg-white rounded-lg shadow p-6">
+                        <h3 class="text-lg font-semibold mb-4">系统参数</h3>
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">意图识别阈值</label>
+                                <input type="range" id="intentThreshold" min="0.1" max="1.0" step="0.1" value="0.8" class="w-full">
+                                <div class="text-sm text-gray-500 mt-1">当前值: <span id="intentThresholdValue">0.8</span></div>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">升级阈值</label>
+                                <input type="range" id="escalationThreshold" min="0.1" max="1.0" step="0.1" value="0.6" class="w-full">
+                                <div class="text-sm text-gray-500 mt-1">当前值: <span id="escalationThresholdValue">0.6</span></div>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">最大对话轮数</label>
+                                <input type="number" id="maxTurns" value="10" min="1" max="50" class="w-full border border-gray-300 rounded px-3 py-2">
+                            </div>
+                            <button onclick="saveSystemConfig()" class="w-full bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
+                                💾 保存配置
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 实时监控页面 -->
+            <div id="page-monitoring" class="page-content p-6 hidden">
+                <h2 class="text-2xl font-bold text-gray-800 mb-6">实时监控</h2>
+                
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+                    <!-- 系统资源监控 -->
+                    <div class="bg-white rounded-lg shadow p-6">
+                        <h3 class="text-lg font-semibold mb-4">系统资源</h3>
+                        <div class="space-y-3">
+                            <div>
+                                <div class="flex justify-between text-sm">
+                                    <span>CPU使用率</span>
+                                    <span id="cpuUsage">-%</span>
+                                </div>
+                                <div class="w-full bg-gray-200 rounded-full h-2">
+                                    <div id="cpuBar" class="bg-blue-500 h-2 rounded-full" style="width: 0%"></div>
+                                </div>
+                            </div>
+                            <div>
+                                <div class="flex justify-between text-sm">
+                                    <span>内存使用率</span>
+                                    <span id="memoryUsage">-%</span>
+                                </div>
+                                <div class="w-full bg-gray-200 rounded-full h-2">
+                                    <div id="memoryBar" class="bg-green-500 h-2 rounded-full" style="width: 0%"></div>
+                                </div>
+                            </div>
+                            <div>
+                                <div class="flex justify-between text-sm">
+                                    <span>磁盘使用率</span>
+                                    <span id="diskUsage">-%</span>
+                                </div>
+                                <div class="w-full bg-gray-200 rounded-full h-2">
+                                    <div id="diskBar" class="bg-yellow-500 h-2 rounded-full" style="width: 0%"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 活跃对话监控 -->
+                    <div class="lg:col-span-2 bg-white rounded-lg shadow p-6">
+                        <h3 class="text-lg font-semibold mb-4">活跃对话</h3>
+                        <div id="activeConversations" class="space-y-2 max-h-64 overflow-y-auto">
+                            <!-- 动态生成对话列表 -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 性能指标趋势 -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h3 class="text-lg font-semibold mb-4">性能趋势</h3>
+                    <canvas id="performanceChart" width="800" height="300"></canvas>
+                </div>
+            </div>
+
+            <!-- 数据分析页面 -->
+            <div id="page-analytics" class="page-content p-6 hidden">
+                <h2 class="text-2xl font-bold text-gray-800 mb-6">数据分析</h2>
+                
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <!-- 使用趋势分析 -->
+                    <div class="bg-white rounded-lg shadow p-6">
+                        <h3 class="text-lg font-semibold mb-4">使用趋势（最近7天）</h3>
+                        <canvas id="usageTrendChart" width="400" height="300"></canvas>
+                    </div>
+
+                    <!-- 质量分析报告 -->
+                    <div class="bg-white rounded-lg shadow p-6">
+                        <h3 class="text-lg font-semibold mb-4">质量分析</h3>
+                        <div id="qualityReport" class="space-y-4">
+                            <!-- 动态生成质量报告 -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 建议和优化 -->
+                <div class="mt-6 bg-white rounded-lg shadow p-6">
+                    <h3 class="text-lg font-semibold mb-4">优化建议</h3>
+                    <div id="recommendations" class="space-y-2">
+                        <!-- 动态生成建议列表 -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 文档上传模态框 -->
+    <div id="uploadModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg p-8 w-96">
+            <h3 class="text-lg font-semibold mb-4">上传文档</h3>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">选择文件</label>
+                    <input type="file" id="uploadFile" accept=".pdf,.txt,.md,.doc,.docx" class="w-full border border-gray-300 rounded px-3 py-2">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">分片策略</label>
+                    <select id="uploadSplitter" class="w-full border border-gray-300 rounded px-3 py-2">
+                        <option value="default_recursive">默认递归分割</option>
+                        <option value="technical_docs">技术文档</option>
+                        <option value="faq_style">FAQ样式</option>
+                        <option value="legal_docs">法律文档</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">文档分类</label>
+                    <select id="uploadCategory" class="w-full border border-gray-300 rounded px-3 py-2">
+                        <option value="">选择分类</option>
+                        <option value="technical">技术文档</option>
+                        <option value="faq">常见问题</option>
+                        <option value="policy">政策条款</option>
+                        <option value="manual">操作手册</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">标签（逗号分隔）</label>
+                    <input type="text" id="uploadTags" placeholder="例如: 技术支持,API文档" class="w-full border border-gray-300 rounded px-3 py-2">
+                </div>
+                <div class="flex space-x-3">
+                    <button onclick="uploadDocument()" class="flex-1 bg-blue-500 text-white py-2 rounded hover:bg-blue-600">
+                        上传
+                    </button>
+                    <button onclick="hideUploadModal()" class="flex-1 bg-gray-500 text-white py-2 rounded hover:bg-gray-600">
+                        取消
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        const API_BASE = 'http://localhost:8001';
+        let currentPage = 1;
+        let pageSize = 20;
+        let authCredentials = null;
+
+        // 页面初始化
+        window.onload = function() {
+            showAuthModal();
+        };
+
+        // 认证相关
+        function showAuthModal() {
+            document.getElementById('authModal').classList.remove('hidden');
+        }
+
+        function hideAuthModal() {
+            document.getElementById('authModal').classList.add('hidden');
+        }
+
+        async function login() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            
+            if (!username || !password) {
+                alert('请输入用户名和密码');
+                return;
+            }
+            
+            // 存储认证信息
+            authCredentials = btoa(`${username}:${password}`);
+            
+            try {
+                // 测试认证
+                const response = await fetch(`${API_BASE}/api/admin/health`, {
+                    headers: {
+                        'Authorization': `Basic ${authCredentials}`
+                    }
+                });
+                
+                if (response.ok) {
+                    hideAuthModal();
+                    initDashboard();
+                } else {
+                    alert('用户名或密码错误');
+                    authCredentials = null;
+                }
+            } catch (error) {
+                alert('连接服务器失败，请检查服务是否启动');
+            }
+        }
+
+        // 初始化仪表板
+        async function initDashboard() {
+            showPage('dashboard');
+            await loadDashboardData();
+            startRealTimeUpdates();
+        }
+
+        // 页面切换
+        function showPage(pageName) {
+            // 隐藏所有页面
+            const pages = document.querySelectorAll('.page-content');
+            pages.forEach(page => page.classList.add('hidden'));
+            
+            // 显示目标页面
+            document.getElementById(`page-${pageName}`).classList.remove('hidden');
+            
+            // 更新导航状态
+            const navLinks = document.querySelectorAll('.sidebar-link');
+            navLinks.forEach(link => link.classList.remove('sidebar-active'));
+            document.getElementById(`nav-${pageName}`).classList.add('sidebar-active');
+            
+            // 加载页面数据
+            switch(pageName) {
+                case 'dashboard':
+                    loadDashboardData();
+                    break;
+                case 'documents':
+                    loadDocuments();
+                    break;
+                case 'config':
+                    loadConfigurations();
+                    break;
+                case 'monitoring':
+                    loadMonitoringData();
+                    break;
+                case 'analytics':
+                    loadAnalyticsData();
+                    break;
+            }
+        }
+
+        // 仪表板数据加载
+        async function loadDashboardData() {
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/health`, {
+                    headers: {
+                        'Authorization': `Basic ${authCredentials}`
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    // 更新关键指标
+                    document.getElementById('totalDocs').textContent = data.document_statistics?.total_documents || 0;
+                    document.getElementById('activeChats').textContent = data.document_statistics?.active_sessions || 0;
+                    document.getElementById('avgQuality').textContent = (data.document_statistics?.average_quality_score || 0).toFixed(2);
+                    
+                    // 更新系统状态
+                    document.getElementById('systemStatus').textContent = data.status;
+                    document.getElementById('systemStatus').className = data.status === 'healthy' ? 'text-green-500' : 'text-red-500';
+                    
+                    // 更新图表
+                    updateResourceChart(data.system_resources);
+                    updateCategoryChart(data.document_statistics?.category_distribution || {});
+                }
+            } catch (error) {
+                console.error('加载仪表板数据失败:', error);
+            }
+        }
+
+        // 文档管理相关
+        async function loadDocuments() {
+            try {
+                const category = document.getElementById('filterCategory')?.value || '';
+                const status = document.getElementById('filterStatus')?.value || '';
+                const tags = document.getElementById('filterTags')?.value || '';
+                
+                const params = new URLSearchParams({
+                    page: currentPage,
+                    page_size: pageSize
+                });
+                
+                if (category) params.append('category', category);
+                if (status) params.append('status', status);
+                if (tags) params.append('tags', tags);
+                
+                const response = await fetch(`${API_BASE}/api/admin/documents?${params}`, {
+                    headers: {
+                        'Authorization': `Basic ${authCredentials}`
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    renderDocumentsTable(data.documents);
+                    updatePagination(data);
+                }
+            } catch (error) {
+                console.error('加载文档列表失败:', error);
+            }
+        }
+
+        function renderDocumentsTable(documents) {
+            const tbody = document.getElementById('documentsTableBody');
+            tbody.innerHTML = '';
+            
+            documents.forEach(doc => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <div class="text-sm font-medium text-gray-900">${doc.filename}</div>
+                        <div class="text-sm text-gray-500">ID: ${doc.doc_id}</div>
+                        <div class="text-sm text-gray-500">${new Date(doc.upload_time).toLocaleString()}</div>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(doc.status)}">
+                            ${doc.status}
+                        </span>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        ${doc.quality_score ? doc.quality_score.toFixed(2) : 'N/A'}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        ${doc.chunk_count}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                        <button onclick="reprocessDocument('${doc.doc_id}')" class="text-blue-600 hover:text-blue-900 mr-3">重处理</button>
+                        <button onclick="deleteDocument('${doc.doc_id}')" class="text-red-600 hover:text-red-900">删除</button>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function getStatusColor(status) {
+            switch(status) {
+                case 'completed': return 'bg-green-100 text-green-800';
+                case 'processing': return 'bg-yellow-100 text-yellow-800';
+                case 'failed': return 'bg-red-100 text-red-800';
+                default: return 'bg-gray-100 text-gray-800';
+            }
+        }
+
+        // 文档上传
+        function showUploadModal() {
+            document.getElementById('uploadModal').classList.remove('hidden');
+        }
+
+        function hideUploadModal() {
+            document.getElementById('uploadModal').classList.add('hidden');
+        }
+
+        async function uploadDocument() {
+            const fileInput = document.getElementById('uploadFile');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('请选择文件');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('splitter_config', document.getElementById('uploadSplitter').value);
+            formData.append('category', document.getElementById('uploadCategory').value);
+            
+            const tags = document.getElementById('uploadTags').value;
+            if (tags) {
+                formData.append('tags', JSON.stringify(tags.split(',').map(t => t.trim())));
+            } else {
+                formData.append('tags', '[]');
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/documents/upload`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Basic ${authCredentials}`
+                    },
+                    body: formData
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    alert('文档上传成功！');
+                    hideUploadModal();
+                    loadDocuments();
+                } else {
+                    const error = await response.json();
+                    alert(`上传失败: ${error.detail}`);
+                }
+            } catch (error) {
+                alert('上传失败，请重试');
+            }
+        }
+
+        // 删除文档
+        async function deleteDocument(docId) {
+            if (!confirm('确定要删除这个文档吗？')) return;
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/documents/${docId}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': `Basic ${authCredentials}`
+                    }
+                });
+                
+                if (response.ok) {
+                    alert('文档删除成功');
+                    loadDocuments();
+                } else {
+                    alert('删除失败');
+                }
+            } catch (error) {
+                alert('删除失败，请重试');
+            }
+        }
+
+        // 重处理文档
+        async function reprocessDocument(docId) {
+            if (!confirm('确定要重新处理这个文档吗？')) return;
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/documents/${docId}/reprocess`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Basic ${authCredentials}`
+                    }
+                });
+                
+                if (response.ok) {
+                    alert('文档重处理成功');
+                    loadDocuments();
+                } else {
+                    alert('重处理失败');
+                }
+            } catch (error) {
+                alert('重处理失败，请重试');
+            }
+        }
+
+        // 配置管理
+        async function loadConfigurations() {
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/splitter-configs`, {
+                    headers: {
+                        'Authorization': `Basic ${authCredentials}`
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    renderSplitterConfigs(data.configs);
+                }
+            } catch (error) {
+                console.error('加载配置失败:', error);
+            }
+        }
+
+        function renderSplitterConfigs(configs) {
+            const container = document.getElementById('splitterConfigs');
+            container.innerHTML = '';
+            
+            Object.entries(configs).forEach(([name, config]) => {
+                const div = document.createElement('div');
+                div.className = 'border border-gray-200 rounded p-3';
+                div.innerHTML = `
+                    <h4 class="font-medium">${name}</h4>
+                    <p class="text-sm text-gray-600">类型: ${config.type} | 块大小: ${config.chunk_size} | 重叠: ${config.chunk_overlap}</p>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        // 系统监控
+        async function loadMonitoringData() {
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/monitoring/system-metrics`, {
+                    headers: {
+                        'Authorization': `Basic ${authCredentials}`
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    updateSystemMetrics(data.system_resources);
+                }
+            } catch (error) {
+                console.error('加载监控数据失败:', error);
+            }
+        }
+
+        function updateSystemMetrics(resources) {
+            // 更新CPU使用率
+            document.getElementById('cpuUsage').textContent = `${resources.cpu_percent}%`;
+            document.getElementById('cpuBar').style.width = `${resources.cpu_percent}%`;
+            
+            // 更新内存使用率
+            document.getElementById('memoryUsage').textContent = `${resources.memory_percent}%`;
+            document.getElementById('memoryBar').style.width = `${resources.memory_percent}%`;
+            
+            // 更新磁盘使用率
+            document.getElementById('diskUsage').textContent = `${resources.disk_percent}%`;
+            document.getElementById('diskBar').style.width = `${resources.disk_percent}%`;
+        }
+
+        // 数据分析
+        async function loadAnalyticsData() {
+            try {
+                const response = await fetch(`${API_BASE}/api/admin/analytics/quality-report`, {
+                    headers: {
+                        'Authorization': `Basic ${authCredentials}`
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    renderQualityReport(data);
+                    renderRecommendations(data.recommendations);
+                }
+            } catch (error) {
+                console.error('加载分析数据失败:', error);
+            }
+        }
+
+        function renderQualityReport(data) {
+            const container = document.getElementById('qualityReport');
+            container.innerHTML = `
+                <div class="space-y-2">
+                    <div class="flex justify-between">
+                        <span>文档平均质量:</span>
+                        <span class="font-medium">${data.document_quality.average_score.toFixed(2)}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span>对话平均置信度:</span>
+                        <span class="font-medium">${data.conversation_quality.average_confidence.toFixed(2)}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span>升级率:</span>
+                        <span class="font-medium">${(data.conversation_quality.escalation_rate * 100).toFixed(1)}%</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span>满意度评分:</span>
+                        <span class="font-medium">${data.conversation_quality.satisfaction_score.toFixed(1)}/5</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderRecommendations(recommendations) {
+            const container = document.getElementById('recommendations');
+            container.innerHTML = '';
+            
+            recommendations.forEach(rec => {
+                const div = document.createElement('div');
+                div.className = 'flex items-start space-x-2';
+                div.innerHTML = `
+                    <span class="text-blue-500">💡</span>
+                    <span class="text-sm text-gray-700">${rec}</span>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        // 图表初始化
+        function updateResourceChart(resources) {
+            const ctx = document.getElementById('resourceChart');
+            if (!ctx) return;
+            
+            new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['CPU使用', 'CPU空闲', '内存使用', '内存空闲'],
+                    datasets: [{
+                        data: [
+                            resources?.cpu_percent || 0,
+                            100 - (resources?.cpu_percent || 0),
+                            resources?.memory_percent || 0,
+                            100 - (resources?.memory_percent || 0)
+                        ],
+                        backgroundColor: ['#3B82F6', '#E5E7EB', '#10B981', '#F3F4F6']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateCategoryChart(distribution) {
+            const ctx = document.getElementById('categoryChart');
+            if (!ctx) return;
+            
+            const labels = Object.keys(distribution);
+            const data = Object.values(distribution);
+            
+            new Chart(ctx, {
+                type: 'pie',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: data,
+                        backgroundColor: [
+                            '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'
+                        ]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+        }
+
+        // 分页控制
+        function previousPage() {
+            if (currentPage > 1) {
+                currentPage--;
+                loadDocuments();
+            }
+        }
+
+        function nextPage() {
+            currentPage++;
+            loadDocuments();
+        }
+
+        function updatePagination(data) {
+            const start = (currentPage - 1) * pageSize + 1;
+            const end = Math.min(currentPage * pageSize, data.total_count);
+            
+            document.getElementById('pageInfo').textContent = `${start}-${end}`;
+            document.getElementById('totalCount').textContent = data.total_count;
+        }
+
+        // 实时更新
+        function startRealTimeUpdates() {
+            setInterval(() => {
+                const currentPageElement = document.querySelector('.page-content:not(.hidden)');
+                if (currentPageElement) {
+                    const pageId = currentPageElement.id;
+                    if (pageId === 'page-dashboard') {
+                        loadDashboardData();
+                    } else if (pageId === 'page-monitoring') {
+                        loadMonitoringData();
+                    }
+                }
+            }, 10000); // 每10秒更新一次
+        }
+
+        // 配置滑块更新
+        document.addEventListener('DOMContentLoaded', function() {
+            const intentSlider = document.getElementById('intentThreshold');
+            const escalationSlider = document.getElementById('escalationThreshold');
+            
+            if (intentSlider) {
+                intentSlider.addEventListener('input', function() {
+                    document.getElementById('intentThresholdValue').textContent = this.value;
+                });
+            }
+            
+            if (escalationSlider) {
+                escalationSlider.addEventListener('input', function() {
+                    document.getElementById('escalationThresholdValue').textContent = this.value;
+                });
+            }
+        });
+    </script>
+</body>
+</html>

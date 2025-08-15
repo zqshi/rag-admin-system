@@ -65,10 +65,16 @@ class EnhancedDocumentProcessor:
             )
         )
         
-        # 初始化向量函数
-        self.embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name=embedding_model
-        )
+        # 初始化向量函数 - 支持离线模式
+        try:
+            self.embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
+                model_name=embedding_model
+            )
+            logger.info(f"成功加载嵌入模型: {embedding_model}")
+        except Exception as e:
+            logger.warning(f"加载嵌入模型失败: {e}")
+            logger.info("降级使用默认嵌入函数")
+            self.embedding_function = embedding_functions.DefaultEmbeddingFunction()
         
         # 获取或创建集合
         try:
@@ -85,12 +91,18 @@ class EnhancedDocumentProcessor:
             )
             logger.info(f"创建新集合: {collection_name}")
         
-        # 初始化LangChain嵌入模型
-        self.embeddings = HuggingFaceEmbeddings(
-            model_name=embedding_model,
-            model_kwargs={'device': 'cpu'},
-            encode_kwargs={'normalize_embeddings': True}
-        )
+        # 初始化LangChain嵌入模型 - 支持离线模式
+        try:
+            self.embeddings = HuggingFaceEmbeddings(
+                model_name=embedding_model,
+                model_kwargs={'device': 'cpu'},
+                encode_kwargs={'normalize_embeddings': True}
+            )
+            logger.info(f"成功加载LangChain嵌入模型: {embedding_model}")
+        except Exception as e:
+            logger.warning(f"加载LangChain嵌入模型失败: {e}")
+            logger.info("跳过LangChain嵌入模型初始化")
+            self.embeddings = None
         
         # 初始化文本分割器
         self._init_text_splitters()
@@ -105,12 +117,23 @@ class EnhancedDocumentProcessor:
             separators=["\n\n", "\n", "。", "！", "？", "；", ".", "!", "?", ";", " ", ""]
         )
         
-        # 基于Token的分割器
-        self.token_splitter = SentenceTransformersTokenTextSplitter(
-            chunk_overlap=50,
-            tokens_per_chunk=100,
-            model_name=self.embedding_model
-        )
+        # 基于Token的分割器 - 支持离线模式
+        try:
+            self.token_splitter = SentenceTransformersTokenTextSplitter(
+                chunk_overlap=50,
+                tokens_per_chunk=100,
+                model_name=self.embedding_model
+            )
+            logger.info("Token分割器初始化成功")
+        except Exception as e:
+            logger.warning(f"Token分割器初始化失败: {e}")
+            # 降级使用字符分割器
+            self.token_splitter = CharacterTextSplitter(
+                chunk_size=512,
+                chunk_overlap=50,
+                separator="\n"
+            )
+            logger.info("降级使用字符分割器代替Token分割器")
         
         # 字符分割器
         self.char_splitter = CharacterTextSplitter(
@@ -179,6 +202,18 @@ class EnhancedDocumentProcessor:
         logger.info(f"文档分割完成: {len(documents)} 页 -> {len(chunks)} 片段")
         return chunks
     
+    def _document_exists(self, doc_id: str) -> bool:
+        """检查文档是否已存在"""
+        try:
+            result = self.collection.get(
+                where={"doc_id": doc_id},
+                limit=1
+            )
+            return len(result['ids']) > 0
+        except Exception as e:
+            logger.warning(f"检查文档存在性时出错: {e}")
+            return False
+    
     def process_and_store(self, 
                          file_path: str,
                          metadata: Optional[Dict[str, Any]] = None,
@@ -196,6 +231,11 @@ class EnhancedDocumentProcessor:
         """
         # 生成文档ID
         doc_id = hashlib.md5(file_path.encode()).hexdigest()[:12]
+        
+        # 检查是否已存在相同文档ID
+        if self._document_exists(doc_id):
+            logger.warning(f"文档已存在: {doc_id}")
+            raise ValueError(f"文档已存在，请勿重复上传: {Path(file_path).name}")
         
         # 加载文档
         documents = self.load_document(file_path)
@@ -261,23 +301,38 @@ class EnhancedDocumentProcessor:
             搜索结果列表
         """
         try:
+            # 查询更多结果以便去重
             results = self.collection.query(
                 query_texts=[query],
-                n_results=n_results,
+                n_results=min(n_results * 2, 20),
                 where=where
             )
             
-            # 格式化结果
+            # 格式化结果并去重
             formatted_results = []
+            seen_contents = set()
+            
             for i in range(len(results['ids'][0])):
+                content = results['documents'][0][i]
+                content_hash = hash(content.strip())
+                
+                # 跳过重复内容
+                if content_hash in seen_contents:
+                    continue
+                
+                seen_contents.add(content_hash)
                 formatted_results.append({
                     'id': results['ids'][0][i],
-                    'content': results['documents'][0][i],
+                    'content': content,
                     'metadata': results['metadatas'][0][i],
                     'distance': results['distances'][0][i] if 'distances' in results else None
                 })
+                
+                # 达到所需数量就停止
+                if len(formatted_results) >= n_results:
+                    break
             
-            logger.info(f"搜索完成: 查询='{query[:50]}...', 结果数={len(formatted_results)}")
+            logger.info(f"搜索完成: 查询='{query[:50]}...', 结果数={len(formatted_results)} (去重后)")
             return formatted_results
             
         except Exception as e:

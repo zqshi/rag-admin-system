@@ -21,26 +21,38 @@ pip install -r requirements.txt
 
 ### 2. 启动系统
 
+**🎯 推荐方式（一键启动Web服务）：**
 ```bash
-# 方式1：使用启动脚本（推荐）
-./start.sh
+./start_web.sh
+```
 
-# 方式2：手动启动
+**手动启动：**
+```bash
+# 1. 启动API服务
 python api/main.py
+
+# 2. 在新终端启动前端服务
+python3 -m http.server 8080
 ```
 
 ### 3. 访问界面
 
-打开浏览器访问：
-- 🌐 Web界面: http://localhost:3000
-- 📚 API文档: http://localhost:8000/docs
-- 💊 健康检查: http://localhost:8000/api/health
+- 🌐 **Web界面**: http://localhost:8080
+- 📚 **API文档**: http://localhost:8000/docs
+- 💊 **健康检查**: http://localhost:8000/api/health
 
-### 4. 测试系统
+### 4. 快速体验
+
+1. **打开** http://localhost:8080
+2. **上传文档** - 支持PDF、TXT、MD、DOC格式
+3. **智能问答** - 基于上传的文档内容回答问题
+4. **查看统计** - 实时监控系统状态
+
+### 5. 测试系统
 
 ```bash
 # 运行功能测试
-python test_system.py
+python test_enhanced.py
 ```
 
 ## 系统架构

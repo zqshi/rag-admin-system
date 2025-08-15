@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAG系统 - 快速访问</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container {
+            background: white;
+            padding: 2rem;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            max-width: 600px;
+            width: 90%;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        .title {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #333;
+            margin: 0;
+        }
+        .subtitle {
+            color: #666;
+            margin: 0.5rem 0 0 0;
+            font-size: 1.1rem;
+        }
+        .links {
+            display: grid;
+            gap: 1rem;
+            margin-top: 2rem;
+        }
+        .link-card {
+            display: block;
+            text-decoration: none;
+            background: #f8f9fa;
+            padding: 1.5rem;
+            border-radius: 12px;
+            border: 2px solid transparent;
+            transition: all 0.3s ease;
+            color: #333;
+        }
+        .link-card:hover {
+            border-color: #667eea;
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+        .link-title {
+            font-size: 1.3rem;
+            font-weight: bold;
+            margin: 0 0 0.5rem 0;
+            color: #667eea;
+        }
+        .link-desc {
+            margin: 0;
+            color: #666;
+            line-height: 1.5;
+        }
+        .status {
+            display: inline-block;
+            padding: 0.3rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: bold;
+            margin-left: 1rem;
+        }
+        .status.online {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status.offline {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .instructions {
+            background: #e3f2fd;
+            padding: 1.5rem;
+            border-radius: 12px;
+            margin-top: 2rem;
+        }
+        .instructions h3 {
+            margin: 0 0 1rem 0;
+            color: #1976d2;
+        }
+        .instructions ol {
+            margin: 0;
+            padding-left: 1.5rem;
+        }
+        .instructions li {
+            margin: 0.5rem 0;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1 class="title">🚀 RAG智能问答系统</h1>
+            <p class="subtitle">基于LangChain + ChromaDB的文档问答系统</p>
+        </div>
+
+        <div class="links">
+            <a href="http://localhost:8080" class="link-card" target="_blank">
+                <div class="link-title">🌐 Web界面<span id="web-status" class="status">检查中...</span></div>
+                <p class="link-desc">完整的Web界面，支持文档上传、智能问答、统计查看</p>
+            </a>
+
+            <a href="http://localhost:8000/docs" class="link-card" target="_blank">
+                <div class="link-title">📚 API文档<span id="api-status" class="status">检查中...</span></div>
+                <p class="link-desc">交互式API文档，包含所有接口的详细说明和测试</p>
+            </a>
+
+            <a href="http://localhost:8000/api/health" class="link-card" target="_blank">
+                <div class="link-title">💊 健康检查<span id="health-status" class="status">检查中...</span></div>
+                <p class="link-desc">系统健康状态检查，确认各组件运行正常</p>
+            </a>
+        </div>
+
+        <div class="instructions">
+            <h3>🛠️ 启动说明</h3>
+            <ol>
+                <li><strong>一键启动：</strong><code>./start_web.sh</code></li>
+                <li><strong>手动启动API：</strong><code>python api/main.py</code></li>
+                <li><strong>手动启动前端：</strong><code>python3 -m http.server 8080</code></li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        // 检查服务状态
+        async function checkStatus(url, statusElementId) {
+            const statusEl = document.getElementById(statusElementId);
+            try {
+                const response = await fetch(url, { method: 'HEAD' });
+                if (response.ok) {
+                    statusEl.textContent = '在线';
+                    statusEl.className = 'status online';
+                } else {
+                    statusEl.textContent = '离线';
+                    statusEl.className = 'status offline';
+                }
+            } catch (error) {
+                statusEl.textContent = '离线';
+                statusEl.className = 'status offline';
+            }
+        }
+
+        // 检查所有服务状态
+        checkStatus('http://localhost:8080', 'web-status');
+        checkStatus('http://localhost:8000/docs', 'api-status');
+        checkStatus('http://localhost:8000/api/health', 'health-status');
+
+        // 每30秒更新一次状态
+        setInterval(() => {
+            checkStatus('http://localhost:8080', 'web-status');
+            checkStatus('http://localhost:8000/docs', 'api-status');
+            checkStatus('http://localhost:8000/api/health', 'health-status');
+        }, 30000);
+    </script>
+</body>
+</html>

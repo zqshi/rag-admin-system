@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """
-RAG MVP系统 - 极简可运行版本
-目标：2小时内实现文档上传、向量化、智能问答
+RAG增强版系统 - 集成LangChain和ChromaDB
 """
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import os
 import shutil
 import hashlib
@@ -16,26 +15,27 @@ import json
 import sqlite3
 from datetime import datetime
 from pathlib import Path
+import logging
 
-# 向量化和检索
-import faiss
-import numpy as np
-from sentence_transformers import SentenceTransformer
+# 导入增强版文档处理器和LLM生成器
+from document_processor import EnhancedDocumentProcessor
+from llm_generator import RAGGenerator
 
-# 文档处理
-import PyPDF2
+# 配置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # 创建FastAPI应用
 app = FastAPI(
-    title="RAG MVP System",
-    description="快速原型 - 文档智能问答系统",
-    version="0.1.0"
+    title="RAG Enhanced System",
+    description="增强版RAG系统 - 使用LangChain和ChromaDB",
+    version="2.0.0"
 )
 
 # 配置CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 生产环境应该设置具体的域名
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -46,30 +46,54 @@ BASE_DIR = Path(__file__).parent.parent
 DATA_DIR = BASE_DIR / "data"
 UPLOAD_DIR = BASE_DIR / "uploads"
 DB_PATH = DATA_DIR / "rag.db"
+CHROMA_DB_DIR = BASE_DIR / "chroma_db"
 
 # 创建必要的目录
 DATA_DIR.mkdir(exist_ok=True)
 UPLOAD_DIR.mkdir(exist_ok=True)
+CHROMA_DB_DIR.mkdir(exist_ok=True)
 
-# 全局变量
-model = None
-index = None
-dimension = 384  # MiniLM-L6-v2的输出维度
+# 全局文档处理器和LLM生成器
+doc_processor = None
+rag_generator = None
 
-def init_vector_model():
-    """初始化向量模型"""
-    global model, index
-    print("正在加载向量模型...")
-    model = SentenceTransformer('paraphrase-MiniLM-L6-v2')
-    index = faiss.IndexFlatL2(dimension)
-    print("向量模型加载完成！")
+# 请求模型
+class QueryRequest(BaseModel):
+    query: str
+    top_k: int = 5
+    filter: Optional[Dict[str, Any]] = None
+    
+class ProcessRequest(BaseModel):
+    file_path: str
+    splitter_type: str = "recursive"
+    metadata: Optional[Dict[str, Any]] = None
+
+class UpdateMetadataRequest(BaseModel):
+    chunk_id: str
+    metadata: Dict[str, Any]
+
+# 响应模型
+class DocumentInfo(BaseModel):
+    doc_id: str
+    filename: str
+    upload_time: str
+    status: str
+    chunk_count: int
+    total_chars: int
+
+class QueryResponse(BaseModel):
+    query: str
+    results: List[Dict[str, Any]]
+    answer: str
+    sources: List[str]
+    processing_time: float
 
 def init_database():
     """初始化SQLite数据库"""
     conn = sqlite3.connect(str(DB_PATH))
     cursor = conn.cursor()
     
-    # 文档表
+    # 增强版文档表
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS documents (
             id TEXT PRIMARY KEY,
@@ -78,20 +102,10 @@ def init_database():
             upload_time TEXT NOT NULL,
             status TEXT DEFAULT 'processing',
             chunk_count INTEGER DEFAULT 0,
-            total_chars INTEGER DEFAULT 0
-        )
-    ''')
-    
-    # 文档片段表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS chunks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            doc_id TEXT NOT NULL,
-            content TEXT NOT NULL,
-            position INTEGER NOT NULL,
-            vector_id INTEGER,
-            char_count INTEGER,
-            FOREIGN KEY (doc_id) REFERENCES documents(id)
+            total_chars INTEGER DEFAULT 0,
+            splitter_type TEXT DEFAULT 'recursive',
+            metadata TEXT,
+            processing_time REAL
         )
     ''')
     
@@ -100,475 +114,429 @@ def init_database():
         CREATE TABLE IF NOT EXISTS search_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             query TEXT NOT NULL,
-            result_count INTEGER,
+            results_count INTEGER,
             processing_time REAL,
-            created_at TEXT NOT NULL
+            timestamp TEXT NOT NULL,
+            filter_used TEXT
+        )
+    ''')
+    
+    # 系统配置表
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS system_config (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            updated_at TEXT
         )
     ''')
     
     conn.commit()
     conn.close()
-    print("数据库初始化完成！")
+    logger.info("数据库初始化完成")
 
-def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
-    """
-    简单的固定大小文本分片
-    """
-    if not text or not text.strip():
-        return []
-    
-    chunks = []
-    text = text.strip()
-    text_len = len(text)
-    
-    # 如果文本很短，直接作为一个片段
-    if text_len <= chunk_size:
-        return [text]
-    
-    start = 0
-    while start < text_len:
-        end = min(start + chunk_size, text_len)
-        chunk = text[start:end].strip()
-        
-        if chunk:
-            chunks.append(chunk)
-        
-        # 如果是最后一个片段，退出
-        if end >= text_len:
-            break
-            
-        start = end - overlap
-    
-    return chunks
-
-def extract_pdf_text(file_path: Path) -> str:
-    """提取PDF文本内容"""
-    text = ""
-    try:
-        with open(file_path, 'rb') as file:
-            try:
-                pdf_reader = PyPDF2.PdfReader(file)
-                num_pages = len(pdf_reader.pages)
-                
-                for page_num in range(num_pages):
-                    try:
-                        page = pdf_reader.pages[page_num]
-                        page_text = page.extract_text()
-                        if page_text:
-                            text += page_text + "\n"
-                    except Exception as page_error:
-                        print(f"跳过第{page_num + 1}页: {page_error}")
-                        continue
-                        
-                print(f"成功提取PDF: {file_path.name}, 共{num_pages}页")
-            except Exception as pdf_error:
-                # 如果是加密PDF，尝试用空密码解密
-                print(f"PDF可能被加密，尝试解密: {pdf_error}")
-                pdf_reader = PyPDF2.PdfReader(file)
-                if pdf_reader.is_encrypted:
-                    try:
-                        pdf_reader.decrypt('')  # 尝试空密码
-                        for page in pdf_reader.pages:
-                            page_text = page.extract_text()
-                            if page_text:
-                                text += page_text + "\n"
-                    except:
-                        raise HTTPException(status_code=400, detail="PDF文件被加密，无法读取")
-                else:
-                    raise
-                    
-    except Exception as e:
-        print(f"PDF提取错误 ({file_path.name}): {str(e)}")
-        # 返回错误信息而不是抛出异常，让用户知道问题
-        return f"[PDF提取失败: {str(e)}]"
-    
-    return text if text else "[PDF内容为空或无法提取]"
-
-def extract_text_from_file(file_path: Path, filename: str) -> str:
-    """根据文件类型提取文本"""
-    ext = filename.lower().split('.')[-1]
-    
-    if ext == 'pdf':
-        return extract_pdf_text(file_path)
-    elif ext in ['txt', 'md', 'text', 'markdown']:
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            return f.read()
-    else:
-        raise HTTPException(status_code=400, detail=f"不支持的文件类型: {ext}")
-
-# 数据模型
-class QueryRequest(BaseModel):
-    query: str
-    top_k: int = 5
-
-class QueryResponse(BaseModel):
-    answer: str
-    sources: List[dict]
-    processing_time: float
-    total_results: int
-
-class DocumentInfo(BaseModel):
-    id: str
-    filename: str
-    upload_time: str
-    status: str
-    chunk_count: int
-    total_chars: int
-
-# API路由
 @app.on_event("startup")
 async def startup_event():
-    """应用启动时初始化"""
+    """启动事件"""
+    global doc_processor, rag_generator
+    
+    print("=" * 50)
+    print("🚀 RAG增强版系统启动中...")
+    print("=" * 50)
+    print(f"📁 数据目录: {DATA_DIR}")
+    print(f"📤 上传目录: {UPLOAD_DIR}")
+    print(f"🗄️ SQLite数据库: {DB_PATH}")
+    print(f"🎯 ChromaDB目录: {CHROMA_DB_DIR}")
+    print("=" * 50)
+    
+    # 初始化数据库
     init_database()
-    init_vector_model()
+    
+    # 初始化文档处理器
+    doc_processor = EnhancedDocumentProcessor(
+        chroma_db_path=str(CHROMA_DB_DIR),
+        embedding_model="paraphrase-MiniLM-L6-v2",
+        collection_name="rag_documents"
+    )
+    
+    # 初始化LLM生成器 - 优先使用本地模型，降级到简单回答
+    try:
+        # 尝试本地LLM
+        rag_generator = RAGGenerator(provider="local", model="llama2")
+        print("✅ LLM生成器初始化完成！(本地模式)")
+    except Exception as e:
+        logger.warning(f"本地LLM初始化失败: {e}")
+        try:
+            # 尝试OpenAI
+            rag_generator = RAGGenerator(provider="openai")
+            print("✅ LLM生成器初始化完成！(OpenAI模式)")
+        except Exception as e:
+            logger.warning(f"OpenAI初始化失败: {e}")
+            try:
+                # 尝试Claude
+                rag_generator = RAGGenerator(provider="claude")
+                print("✅ LLM生成器初始化完成！(Claude模式)")
+            except Exception as e:
+                logger.warning(f"Claude初始化失败: {e}")
+                rag_generator = None
+                print("⚠️ LLM生成器初始化失败，将使用简单模式")
+    
+    print("✅ 文档处理器初始化完成！")
+    print("✅ ChromaDB向量数据库就绪！")
+    print("=" * 50)
 
 @app.get("/")
 async def root():
-    """API根路径"""
+    """根路径"""
     return {
-        "message": "RAG MVP System Running",
-        "version": "0.1.0",
-        "endpoints": {
-            "upload": "/api/upload",
-            "query": "/api/query", 
-            "documents": "/api/documents",
-            "health": "/api/health"
-        }
+        "message": "RAG增强版系统",
+        "version": "2.0.0",
+        "features": [
+            "LangChain智能文档切片",
+            "ChromaDB向量数据库",
+            "多种切片策略",
+            "高级语义搜索"
+        ]
     }
 
 @app.get("/api/health")
 async def health_check():
     """健康检查"""
+    stats = doc_processor.get_statistics() if doc_processor else {}
+    
+    # LLM状态检查
+    llm_status = {
+        "available": rag_generator is not None,
+        "provider": rag_generator.provider if rag_generator else None,
+        "model": getattr(rag_generator.generator, 'model', 'unknown') if rag_generator else None
+    }
+    
     return {
         "status": "healthy",
-        "model_loaded": model is not None,
-        "index_size": index.ntotal if index else 0,
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now().isoformat(),
+        "database": "connected",
+        "chroma_db": "active",
+        "llm": llm_status,
+        "components": {
+            "document_processor": "ready" if doc_processor else "not_initialized",
+            "vector_db": "ready" if doc_processor else "not_initialized", 
+            "llm_generator": "ready" if rag_generator else "fallback_mode"
+        },
+        "statistics": stats
     }
 
 @app.post("/api/upload")
-async def upload_document(file: UploadFile = File(...)):
+async def upload_document(
+    file: UploadFile = File(...),
+    splitter_type: str = Query("recursive", description="切片类型: recursive, token, char")
+):
     """上传并处理文档"""
-    start_time = datetime.now()
+    import time
+    start_time = time.time()
     
-    # 验证文件
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="文件名不能为空")
+    # 生成文档ID
+    doc_id = hashlib.md5(f"{file.filename}_{datetime.now().isoformat()}".encode()).hexdigest()[:12]
     
-    # 生成唯一ID
-    doc_id = hashlib.md5(
-        f"{file.filename}{datetime.now().isoformat()}".encode()
-    ).hexdigest()[:12]
+    # 保存文件
+    file_path = UPLOAD_DIR / f"{doc_id}_{file.filename}"
+    with open(file_path, "wb") as buffer:
+        content = await file.read()
+        buffer.write(content)
     
+    # 处理文档
     try:
-        # 保存文件
-        file_path = UPLOAD_DIR / f"{doc_id}_{file.filename}"
-        with open(file_path, "wb") as buffer:
-            content = await file.read()
-            buffer.write(content)
+        result = doc_processor.process_and_store(
+            file_path=str(file_path),
+            metadata={
+                "filename": file.filename,
+                "upload_time": datetime.now().isoformat(),
+                "file_size": len(content)
+            },
+            splitter_type=splitter_type
+        )
         
-        # 记录到数据库
+        processing_time = time.time() - start_time
+        
+        # 保存到数据库
         conn = sqlite3.connect(str(DB_PATH))
         cursor = conn.cursor()
-        
-        cursor.execute(
-            """INSERT INTO documents 
-               (id, filename, file_path, upload_time, status) 
-               VALUES (?, ?, ?, ?, ?)""",
-            (doc_id, file.filename, str(file_path), 
-             datetime.now().isoformat(), "processing")
-        )
-        conn.commit()
-        
-        # 提取文本
-        try:
-            text = extract_text_from_file(file_path, file.filename)
-        except Exception as e:
-            cursor.execute(
-                "UPDATE documents SET status = ? WHERE id = ?",
-                ("failed", doc_id)
-            )
-            conn.commit()
-            conn.close()
-            return {
-                "status": "error",
-                "message": f"文档处理失败: {str(e)}",
-                "doc_id": doc_id,
-                "filename": file.filename
-            }
-        
-        # 检查是否提取失败
-        if text and text.startswith("[PDF提取失败"):
-            cursor.execute(
-                "UPDATE documents SET status = ? WHERE id = ?",
-                ("failed", doc_id)
-            )
-            conn.commit()
-            conn.close()
-            return {
-                "status": "error",
-                "message": text,
-                "doc_id": doc_id,
-                "filename": file.filename
-            }
-        
-        if not text or not text.strip() or text == "[PDF内容为空或无法提取]":
-            cursor.execute(
-                "UPDATE documents SET status = ? WHERE id = ?",
-                ("empty", doc_id)
-            )
-            conn.commit()
-            conn.close()
-            return {
-                "status": "warning",
-                "message": "文档内容为空或无法提取",
-                "doc_id": doc_id,
-                "filename": file.filename
-            }
-        
-        # 文本分片
-        chunks = chunk_text(text, chunk_size=500, overlap=50)
-        
-        # 向量化并存储
-        for i, chunk in enumerate(chunks):
-            # 生成向量
-            embedding = model.encode([chunk])[0]
-            
-            # 添加到FAISS索引
-            vector_id = index.ntotal
-            index.add(np.array([embedding], dtype=np.float32))
-            
-            # 存储到数据库
-            cursor.execute(
-                """INSERT INTO chunks 
-                   (doc_id, content, position, vector_id, char_count) 
-                   VALUES (?, ?, ?, ?, ?)""",
-                (doc_id, chunk, i, vector_id, len(chunk))
-            )
-        
-        # 更新文档状态
-        cursor.execute(
-            """UPDATE documents 
-               SET status = ?, chunk_count = ?, total_chars = ? 
-               WHERE id = ?""",
-            ("completed", len(chunks), len(text), doc_id)
-        )
+        cursor.execute('''
+            INSERT INTO documents (id, filename, file_path, upload_time, status, chunk_count, total_chars, splitter_type, processing_time)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            result['doc_id'],
+            file.filename,
+            str(file_path),
+            datetime.now().isoformat(),
+            'completed',
+            result['chunks_count'],
+            result['total_chars'],
+            splitter_type,
+            processing_time
+        ))
         conn.commit()
         conn.close()
         
-        processing_time = (datetime.now() - start_time).total_seconds()
-        
         return {
-            "status": "success",
-            "doc_id": doc_id,
+            "success": True,
+            "doc_id": result['doc_id'],
             "filename": file.filename,
-            "chunks_created": len(chunks),
-            "total_chars": len(text),
-            "processing_time": f"{processing_time:.2f}秒"
+            "chunks_count": result['chunks_count'],
+            "total_chars": result['total_chars'],
+            "processing_time": processing_time,
+            "splitter_type": splitter_type
         }
         
     except Exception as e:
-        # 清理失败的上传
+        logger.error(f"处理文档失败: {str(e)}")
+        # 清理文件
         if file_path.exists():
             file_path.unlink()
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/query", response_model=QueryResponse)
+@app.post("/api/query")
 async def query_documents(request: QueryRequest):
-    """智能问答查询"""
-    start_time = datetime.now()
-    
-    if not request.query or not request.query.strip():
-        raise HTTPException(status_code=400, detail="查询内容不能为空")
-    
-    # 检查是否有文档
-    if index.ntotal == 0:
-        return QueryResponse(
-            answer="系统中还没有任何文档，请先上传文档。",
-            sources=[],
-            processing_time=0,
-            total_results=0
-        )
+    """查询文档"""
+    import time
+    start_time = time.time()
     
     try:
-        # 查询向量化
-        query_embedding = model.encode([request.query])[0]
-        
-        # FAISS搜索
-        k = min(request.top_k, index.ntotal)
-        distances, indices = index.search(
-            np.array([query_embedding], dtype=np.float32), k
+        # 执行搜索
+        results = doc_processor.search(
+            query=request.query,
+            n_results=request.top_k,
+            where=request.filter
         )
         
-        # 获取对应的文本片段
-        conn = sqlite3.connect(str(DB_PATH))
-        cursor = conn.cursor()
-        
-        sources = []
-        contexts = []
-        
-        for idx, distance in zip(indices[0], distances[0]):
-            cursor.execute(
-                """SELECT c.content, c.position, d.filename, c.char_count
-                   FROM chunks c 
-                   JOIN documents d ON c.doc_id = d.id 
-                   WHERE c.vector_id = ?""",
-                (int(idx),)
+        # 使用LLM生成答案
+        if rag_generator and results:
+            # 使用LLM生成器生成智能回答
+            llm_result = rag_generator.generate_answer(
+                query=request.query,
+                retrieved_results=results,
+                max_tokens=1000,
+                temperature=0.7
             )
-            result = cursor.fetchone()
             
-            if result:
-                content, position, filename, char_count = result
-                score = float(1 / (1 + distance))  # 转换为相似度
+            answer = llm_result.get("answer", "生成回答时出现错误。")
+            sources = llm_result.get("sources", [])
+            
+            # 记录LLM使用情况
+            logger.info(f"LLM生成完成: model={llm_result.get('model')}, "
+                       f"tokens={llm_result.get('tokens_used', 0)}, "
+                       f"success={llm_result.get('success', False)}")
+            
+        elif results:
+            # 降级：简单的文本拼接（无LLM可用时）
+            contexts = []
+            seen_contexts = set()
+            
+            for r in results:
+                context = r['content'][:300].strip()
+                context_hash = hash(context)
+                if context_hash not in seen_contexts:
+                    seen_contexts.add(context_hash)
+                    contexts.append(context)
+            
+            sources = list(set([r['metadata'].get('source', 'Unknown') for r in results]))
+            sources = [s.split('/')[-1] for s in sources]  # 只保留文件名
+            
+            if len(contexts) > 0:
+                answer = f"基于检索到的 {len(results)} 个文档片段，找到以下相关信息：\n\n"
+                for i, context in enumerate(contexts[:3], 1):
+                    preview = context[:200] + "..." if len(context) > 200 else context
+                    answer += f"**片段{i}**: {preview}\n\n"
                 
-                sources.append({
-                    "content": content[:300] + "..." if len(content) > 300 else content,
-                    "filename": filename,
-                    "position": position + 1,
-                    "score": round(score, 3),
-                    "char_count": char_count
-                })
-                contexts.append(content)
+                if len(contexts) > 3:
+                    answer += f"...以及其他 {len(contexts)-3} 个相关片段。"
+                    
+                answer += "\n\n> ⚠️ 当前使用简单模式，建议配置LLM获得更智能的回答。"
+            else:
+                answer = "检索到相关文档，但内容处理出现问题。"
+        else:
+            answer = "抱歉，没有找到与您的问题相关的内容。请尝试其他关键词或上传相关文档。"
+            sources = []
+        
+        processing_time = time.time() - start_time
         
         # 记录搜索日志
-        processing_time = (datetime.now() - start_time).total_seconds()
-        cursor.execute(
-            """INSERT INTO search_logs 
-               (query, result_count, processing_time, created_at) 
-               VALUES (?, ?, ?, ?)""",
-            (request.query, len(sources), processing_time, 
-             datetime.now().isoformat())
-        )
+        conn = sqlite3.connect(str(DB_PATH))
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO search_logs (query, results_count, processing_time, timestamp, filter_used)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (
+            request.query,
+            len(results),
+            processing_time,
+            datetime.now().isoformat(),
+            json.dumps(request.filter) if request.filter else None
+        ))
         conn.commit()
         conn.close()
         
-        # 生成答案（简化版，实际应接入LLM）
-        if contexts:
-            # 简单拼接最相关的内容作为答案
-            answer = f"根据知识库中的 {len(contexts)} 个相关片段：\n\n"
-            
-            # 取前3个最相关的片段
-            for i, ctx in enumerate(contexts[:3], 1):
-                preview = ctx[:200] + "..." if len(ctx) > 200 else ctx
-                answer += f"{i}. {preview}\n\n"
-                
-            answer += f"\n💡 提示：这是基于向量相似度的检索结果，完整内容请查看源文件。"
-        else:
-            answer = "未找到与您查询相关的内容。"
-        
-        return QueryResponse(
-            answer=answer,
-            sources=sources,
-            processing_time=round(processing_time, 3),
-            total_results=len(sources)
-        )
+        return {
+            "query": request.query,
+            "results": results,
+            "answer": answer,
+            "sources": sources,
+            "processing_time": processing_time
+        }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
+        logger.error(f"查询失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/documents", response_model=List[DocumentInfo])
+@app.get("/api/documents")
 async def list_documents():
-    """获取所有文档列表"""
+    """获取文档列表"""
     conn = sqlite3.connect(str(DB_PATH))
     cursor = conn.cursor()
-    
-    cursor.execute(
-        """SELECT id, filename, upload_time, status, chunk_count, total_chars 
-           FROM documents 
-           ORDER BY upload_time DESC"""
-    )
-    documents = cursor.fetchall()
+    cursor.execute('''
+        SELECT id, filename, upload_time, status, chunk_count, total_chars, splitter_type, processing_time
+        FROM documents
+        ORDER BY upload_time DESC
+    ''')
+    rows = cursor.fetchall()
     conn.close()
     
-    return [
-        DocumentInfo(
-            id=doc[0],
-            filename=doc[1],
-            upload_time=doc[2],
-            status=doc[3],
-            chunk_count=doc[4] or 0,
-            total_chars=doc[5] or 0
-        )
-        for doc in documents
-    ]
+    documents = []
+    for row in rows:
+        documents.append({
+            "id": row[0],
+            "filename": row[1],
+            "upload_time": row[2],
+            "status": row[3],
+            "chunk_count": row[4],
+            "total_chars": row[5],
+            "splitter_type": row[6],
+            "processing_time": row[7]
+        })
+    
+    return documents
 
 @app.delete("/api/documents/{doc_id}")
 async def delete_document(doc_id: str):
     """删除文档"""
-    conn = sqlite3.connect(str(DB_PATH))
-    cursor = conn.cursor()
-    
-    # 检查文档是否存在
-    cursor.execute("SELECT file_path FROM documents WHERE id = ?", (doc_id,))
-    result = cursor.fetchone()
-    
-    if not result:
-        conn.close()
-        raise HTTPException(status_code=404, detail="文档不存在")
-    
-    file_path = Path(result[0])
-    
-    # 删除文件
-    if file_path.exists():
-        file_path.unlink()
-    
-    # 删除数据库记录
-    cursor.execute("DELETE FROM chunks WHERE doc_id = ?", (doc_id,))
-    cursor.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
-    conn.commit()
-    conn.close()
-    
-    # 注意：FAISS索引中的向量无法单独删除，需要重建索引
-    # 这是MVP版本的限制，生产版本应该使用支持删除的向量数据库
-    
-    return {"status": "success", "message": f"文档 {doc_id} 已删除"}
+    try:
+        # 从向量数据库删除
+        success = doc_processor.delete_document(doc_id)
+        
+        if success:
+            # 从SQLite删除
+            conn = sqlite3.connect(str(DB_PATH))
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM documents WHERE id = ?', (doc_id,))
+            conn.commit()
+            conn.close()
+            
+            return {"success": True, "message": f"文档 {doc_id} 已删除"}
+        else:
+            raise HTTPException(status_code=404, detail="文档不存在")
+            
+    except Exception as e:
+        logger.error(f"删除文档失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/stats")
+@app.get("/api/statistics")
 async def get_statistics():
     """获取系统统计信息"""
+    # 获取ChromaDB统计
+    chroma_stats = doc_processor.get_statistics() if doc_processor else {}
+    
+    # 获取SQLite统计
     conn = sqlite3.connect(str(DB_PATH))
     cursor = conn.cursor()
     
-    # 文档统计
-    cursor.execute("SELECT COUNT(*), SUM(chunk_count), SUM(total_chars) FROM documents WHERE status = 'completed'")
-    doc_stats = cursor.fetchone()
+    cursor.execute('SELECT COUNT(*) FROM documents')
+    doc_count = cursor.fetchone()[0]
     
-    # 搜索统计
-    cursor.execute("SELECT COUNT(*), AVG(processing_time) FROM search_logs")
-    search_stats = cursor.fetchone()
+    cursor.execute('SELECT COUNT(*) FROM search_logs')
+    search_count = cursor.fetchone()[0]
+    
+    cursor.execute('SELECT AVG(processing_time) FROM documents WHERE processing_time IS NOT NULL')
+    avg_processing = cursor.fetchone()[0] or 0
+    
+    cursor.execute('SELECT SUM(chunk_count) FROM documents')
+    total_chunks = cursor.fetchone()[0] or 0
     
     conn.close()
     
     return {
-        "documents": {
-            "total": doc_stats[0] or 0,
-            "total_chunks": doc_stats[1] or 0,
-            "total_chars": doc_stats[2] or 0
-        },
-        "searches": {
-            "total": search_stats[0] or 0,
-            "avg_time": round(search_stats[1], 3) if search_stats[1] else 0
-        },
-        "index": {
-            "vectors": index.ntotal if index else 0,
-            "dimension": dimension
-        }
+        "documents_count": doc_count,
+        "total_chunks": total_chunks,
+        "search_count": search_count,
+        "avg_processing_time": avg_processing,
+        "chroma_db": chroma_stats
     }
+
+@app.post("/api/reprocess")
+async def reprocess_document(request: ProcessRequest):
+    """重新处理已存在的文档"""
+    try:
+        # 检查文件是否存在
+        if not Path(request.file_path).exists():
+            raise HTTPException(status_code=404, detail="文件不存在")
+        
+        # 重新处理
+        result = doc_processor.process_and_store(
+            file_path=request.file_path,
+            metadata=request.metadata,
+            splitter_type=request.splitter_type
+        )
+        
+        return {
+            "success": True,
+            "result": result
+        }
+        
+    except Exception as e:
+        logger.error(f"重新处理失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/metadata")
+async def update_metadata(request: UpdateMetadataRequest):
+    """更新文档片段元数据"""
+    try:
+        success = doc_processor.update_metadata(
+            chunk_id=request.chunk_id,
+            metadata=request.metadata
+        )
+        
+        if success:
+            return {"success": True, "message": "元数据已更新"}
+        else:
+            raise HTTPException(status_code=404, detail="片段不存在")
+            
+    except Exception as e:
+        logger.error(f"更新元数据失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/search-logs")
+async def get_search_logs(limit: int = Query(100, description="返回记录数")):
+    """获取搜索日志"""
+    conn = sqlite3.connect(str(DB_PATH))
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT query, results_count, processing_time, timestamp, filter_used
+        FROM search_logs
+        ORDER BY timestamp DESC
+        LIMIT ?
+    ''', (limit,))
+    rows = cursor.fetchall()
+    conn.close()
+    
+    logs = []
+    for row in rows:
+        logs.append({
+            "query": row[0],
+            "results_count": row[1],
+            "processing_time": row[2],
+            "timestamp": row[3],
+            "filter_used": json.loads(row[4]) if row[4] else None
+        })
+    
+    return logs
 
 if __name__ == "__main__":
     import uvicorn
-    print("\n" + "="*50)
-    print("🚀 RAG MVP系统启动中...")
-    print("="*50)
-    print(f"📁 数据目录: {DATA_DIR}")
-    print(f"📤 上传目录: {UPLOAD_DIR}")
-    print(f"🗄️ 数据库: {DB_PATH}")
-    print("="*50 + "\n")
-    
-    uvicorn.run(
-        app, 
-        host="0.0.0.0", 
-        port=8000, 
-        reload=False,  # 修改为False避免警告
-        log_level="info"
-    )
+    uvicorn.run(app, host="0.0.0.0", port=8000)
